@@ -1,13 +1,18 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, ScheduleEvent, AppView } from './types';
 import { COLORS } from './constants';
 import Sidebar from './components/Sidebar';
 import CalendarGrid from './components/CalendarGrid';
 import TimetableEntry from './components/TimetableEntry';
-import EventForm from './components/EventForm';
 import { getSmartSuggestions } from './services/gemini';
-import { fetchCircleData, syncEventToCloud, subscribeToCircle } from './services/supabase';
+import { 
+  fetchCircleData, 
+  syncEventToCloud, 
+  subscribeToCircle, 
+  ensureUserInCloud,
+  deleteEventFromCloud 
+} from './services/supabase';
 
 const App: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(() => {
@@ -20,44 +25,40 @@ const App: React.FC = () => {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [view, setView] = useState<AppView>('calendar');
   const [currentDate, setCurrentDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<string | null>(localStorage.getItem('synccircle_my_id'));
   const [suggestions, setSuggestions] = useState<{ day: string; time: string; reason: string }[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
 
-  // --- THE REAL CLOUD SYNC ENGINE ---
+  const loadCloudData = useCallback(async (id: string) => {
+    setIsCloudSyncing(true);
+    try {
+      const { users: cloudUsers, events: cloudEvents } = await fetchCircleData(id);
+      setUsers(cloudUsers);
+      setEvents(cloudEvents);
+    } catch (e) {
+      console.error("Cloud Fetch Error:", e);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  }, []);
+
+  // --- REAL-TIME ENGINE ---
   useEffect(() => {
     if (!sessionId) return;
 
-    const loadAndSubscribe = async () => {
-      setIsCloudSyncing(true);
-      try {
-        // 1. Initial Load from Supabase
-        // const { users, events } = await fetchCircleData(sessionId);
-        // setUsers(users); setEvents(events);
-        
-        // 2. Establish Real-time Listener
-        const subscription = subscribeToCircle(sessionId, async () => {
-          console.log("Cloud update detected! Refreshing...");
-          // const { events: updatedEvents } = await fetchCircleData(sessionId);
-          // setEvents(updatedEvents);
-        });
+    loadCloudData(sessionId);
 
-        return () => { subscription.unsubscribe(); };
-      } catch (e) {
-        console.error("Cloud Connection Lost:", e);
-      } finally {
-        setIsCloudSyncing(false);
-      }
-    };
+    const subscription = subscribeToCircle(sessionId, (payload) => {
+      console.log("Cloud Push Received:", payload);
+      loadCloudData(sessionId);
+    });
 
-    loadAndSubscribe();
-  }, [sessionId]);
+    return () => { subscription.unsubscribe(); };
+  }, [sessionId, loadCloudData]);
 
   const handleCreateCircle = async (name: string, userName: string, avatar?: string) => {
     const id = Math.random().toString(36).substr(2, 9);
-    
-    // In production: const { data } = await supabase.from('circles').insert({ name }).select();
     
     const newUser: User = { 
       id: Math.random().toString(36).substr(2, 9), 
@@ -68,13 +69,28 @@ const App: React.FC = () => {
       avatar 
     };
 
-    setGroupName(name);
-    setUsers([newUser]);
-    setCurrentUser(newUser.id);
-    setSessionId(id);
-    
-    const newUrl = `${window.location.origin}${window.location.pathname}?group=${id}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
+    try {
+      await ensureUserInCloud(newUser, id);
+      localStorage.setItem('synccircle_my_id', newUser.id);
+      setGroupName(name);
+      setUsers([newUser]);
+      setCurrentUser(newUser.id);
+      setSessionId(id);
+      
+      const newUrl = `${window.location.origin}${window.location.pathname}?group=${id}`;
+      window.history.pushState({ path: newUrl }, '', newUrl);
+    } catch (e) {
+      alert("Failed to create cloud circle. Check your Supabase keys.");
+    }
+  };
+
+  const handleDeleteEvent = async (id: string) => {
+    try {
+      await deleteEventFromCloud(id);
+      // Local state will be updated by the real-time subscription
+    } catch (e) {
+      console.error("Delete failed:", e);
+    }
   };
 
   if (!sessionId) return <LandingPage onCreate={handleCreateCircle} />;
@@ -89,11 +105,14 @@ const App: React.FC = () => {
         onToggleAll={(active) => setUsers(users.map(u => ({ ...u, active })))}
         onAddUser={() => {}} 
         onUpdateUser={(id, updates) => setUsers(users.map(u => u.id === id ? { ...u, ...updates } : u))}
-        onDeleteUser={(id) => setUsers(users.filter(u => u.id !== id))}
+        onDeleteUser={(id) => {}}
         onSelectCurrentUser={setCurrentUser}
         onOpenProfile={() => {}}
         currentUser={currentUser}
-        onNewCircle={() => setSessionId(null)}
+        onNewCircle={() => {
+          localStorage.removeItem('synccircle_my_id');
+          window.location.href = window.location.origin + window.location.pathname;
+        }}
       />
       
       <main className="flex-1 flex flex-col h-full overflow-hidden">
@@ -102,13 +121,13 @@ const App: React.FC = () => {
             <h2 className="text-xl font-black text-slate-900 tracking-tight flex items-center gap-3">
               {groupName}
               <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 rounded-full border border-indigo-100">
-                <div className={`w-1.5 h-1.5 rounded-full ${isCloudSyncing ? 'bg-amber-500' : 'bg-indigo-500'} animate-pulse relative pulse-ring`} />
+                <div className={`w-1.5 h-1.5 rounded-full ${isCloudSyncing ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse relative pulse-ring`} />
                 <span className="text-[8px] font-black text-indigo-600 uppercase tracking-widest">
-                  {isCloudSyncing ? 'Connecting Cloud...' : 'Real-time Live'}
+                  {isCloudSyncing ? 'Syncing...' : 'Connected'}
                 </span>
               </div>
             </h2>
-            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Circle ID: {sessionId}</p>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Invite URL: {window.location.href}</p>
           </div>
           
           <div className="flex items-center gap-4">
@@ -135,7 +154,7 @@ const App: React.FC = () => {
           <CalendarGrid 
             users={users} 
             events={events} 
-            onDeleteEvent={(id) => setEvents(events.filter(e => e.id !== id))} 
+            onDeleteEvent={handleDeleteEvent} 
             onEditEvent={() => {}} 
             currentDate={new Date(currentDate)} 
           />
@@ -148,7 +167,7 @@ const App: React.FC = () => {
               </div>
               <div className="space-y-6">
                 {suggestions.map((s, i) => (
-                  <div key={i} className="p-8 bg-indigo-50/50 rounded-[2.2rem] border border-indigo-100/30 group hover:bg-indigo-50 transition-colors">
+                  <div key={i} className="p-8 bg-indigo-50/50 rounded-[2.2rem] border border-indigo-100/30">
                     <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">{s.day}</p>
                     <p className="font-black text-slate-900 text-lg mb-3">{s.time}</p>
                     <p className="text-xs text-slate-500 font-semibold leading-relaxed">"{s.reason}"</p>
@@ -166,10 +185,15 @@ const App: React.FC = () => {
             <TimetableEntry 
               currentUser={currentUserObj} 
               onAddBatch={async (newEvents, tz) => {
-                // In production: await Promise.all(newEvents.map(e => syncEventToCloud(e, sessionId!)));
-                const committed = newEvents.map(e => ({ ...e, id: Math.random().toString(36).substr(2, 9) }));
-                setEvents([...events, ...committed]);
-                setView('calendar');
+                setIsCloudSyncing(true);
+                try {
+                  await Promise.all(newEvents.map(e => syncEventToCloud(e, sessionId!)));
+                  setView('calendar');
+                } catch (e) {
+                  alert("Failed to save to cloud.");
+                } finally {
+                  setIsCloudSyncing(false);
+                }
               }} 
               onCancel={() => setView('calendar')} 
             />
@@ -199,7 +223,7 @@ const LandingPage: React.FC<{ onCreate: (n: string, un: string, av?: string) => 
         </div>
         
         <h1 className="text-5xl font-black text-slate-900 tracking-tighter mb-4 leading-tight">SyncCircle</h1>
-        <p className="text-slate-400 font-medium mb-12 text-lg">Real-time collaboration for friend groups.</p>
+        <p className="text-slate-400 font-medium mb-12 text-lg">Connected schedules for friend groups.</p>
         
         <div className="space-y-8 text-left">
           <div className="flex flex-col items-center">
@@ -219,13 +243,13 @@ const LandingPage: React.FC<{ onCreate: (n: string, un: string, av?: string) => 
 
           <div className="grid grid-cols-1 gap-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">My Identity</label>
+              <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">My Display Name</label>
               <input className="w-full p-6 bg-slate-50 border-none rounded-[1.8rem] font-bold text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder="e.g. Sarah" value={uName} onChange={(e) => setUName(e.target.value)} />
             </div>
 
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Circle Name</label>
-              <input className="w-full p-6 bg-slate-50 border-none rounded-[1.8rem] font-bold text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder="e.g. Uni Flatmates" value={cName} onChange={(e) => setCName(e.target.value)} />
+              <input className="w-full p-6 bg-slate-50 border-none rounded-[1.8rem] font-bold text-sm outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all" placeholder="e.g. Uni Friends" value={cName} onChange={(e) => setCName(e.target.value)} />
             </div>
           </div>
 
@@ -234,7 +258,7 @@ const LandingPage: React.FC<{ onCreate: (n: string, un: string, av?: string) => 
             onClick={() => onCreate(cName, uName, avatar)}
             className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-xl shadow-2xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-[0.98] disabled:opacity-50 mt-4"
           >
-            Deploy My Circle
+            Go Cloud Live
           </button>
         </div>
       </div>
