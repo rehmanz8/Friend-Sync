@@ -2,14 +2,14 @@
 import { createClient } from '@supabase/supabase-js';
 import { ScheduleEvent, User } from '../types';
 
-// These should be set in your environment (e.g., Vercel or local .env)
+// These should be set in your Vercel Environment Variables
 const supabaseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
 const supabaseKey = process.env.SUPABASE_ANON_KEY || 'your-anon-key';
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 /**
- * CIRCLE OPERATIONS
+ * Ensures user profile exists in cloud
  */
 export const ensureUserInCloud = async (user: User, circleId: string) => {
   const { data, error } = await supabase
@@ -21,57 +21,55 @@ export const ensureUserInCloud = async (user: User, circleId: string) => {
       color: user.color,
       avatar_url: user.avatar,
       timezone: user.timezone
-    })
+    }, { onConflict: 'id' })
     .select();
   
   if (error) throw error;
-  return data[0];
+  return data?.[0];
 };
 
 /**
- * FETCHING DATA
+ * Fetches all circle data (users + events)
  */
 export const fetchCircleData = async (circleId: string) => {
-  // 1. Get Users
-  const { data: usersData, error: uError } = await supabase
-    .from('circle_users')
-    .select('*')
-    .eq('circle_id', circleId);
+  try {
+    const [uRes, eRes] = await Promise.all([
+      supabase.from('circle_users').select('*').eq('circle_id', circleId),
+      supabase.from('events').select('*').eq('circle_id', circleId)
+    ]);
 
-  // 2. Get Events
-  const { data: eventsData, error: eError } = await supabase
-    .from('events')
-    .select('*')
-    .eq('circle_id', circleId);
+    if (uRes.error) throw uRes.error;
+    if (eRes.error) throw eRes.error;
+    
+    const users: User[] = (uRes.data || []).map(u => ({
+      id: u.id,
+      name: u.name,
+      color: u.color,
+      avatar: u.avatar_url,
+      timezone: u.timezone,
+      active: true
+    }));
 
-  if (uError || eError) throw new Error("Cloud fetch failed");
-  
-  // Map Supabase schema back to our App Types
-  const users: User[] = (usersData || []).map(u => ({
-    id: u.id,
-    name: u.name,
-    color: u.color,
-    avatar: u.avatar_url,
-    timezone: u.timezone,
-    active: true
-  }));
-
-  const events: ScheduleEvent[] = (eventsData || []).map(e => ({
-    id: e.id,
-    userId: e.user_id,
-    title: e.title,
-    day: e.day,
-    startTime: e.start_time,
-    duration: e.duration,
-    startDate: e.start_date,
-    endDate: e.end_date
-  }));
-  
-  return { users, events };
+    const events: ScheduleEvent[] = (eRes.data || []).map(e => ({
+      id: e.id,
+      userId: e.user_id,
+      title: e.title,
+      day: e.day,
+      startTime: e.start_time,
+      duration: e.duration,
+      startDate: e.start_date,
+      endDate: e.end_date
+    }));
+    
+    return { users, events };
+  } catch (err) {
+    console.error("Supabase Fetch Failed:", err);
+    return { users: [], events: [] };
+  }
 };
 
 /**
- * SYNCING DATA
+ * Push single event to cloud
  */
 export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleId: string) => {
   const { data, error } = await supabase
@@ -89,9 +87,12 @@ export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleI
     .select();
     
   if (error) throw error;
-  return data[0];
+  return data?.[0];
 };
 
+/**
+ * Delete event from cloud
+ */
 export const deleteEventFromCloud = async (eventId: string) => {
   const { error } = await supabase
     .from('events')
@@ -101,20 +102,20 @@ export const deleteEventFromCloud = async (eventId: string) => {
 };
 
 /**
- * REAL-TIME SUBSCRIPTION
+ * Real-time subscription to circle updates
  */
-export const subscribeToCircle = (circleId: string, onUpdate: (payload: any) => void) => {
+export const subscribeToCircle = (circleId: string, onUpdate: () => void) => {
   return supabase
     .channel(`circle-${circleId}`)
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'events', filter: `circle_id=eq.${circleId}` },
-      (payload) => onUpdate(payload)
+      onUpdate
     )
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'circle_users', filter: `circle_id=eq.${circleId}` },
-      (payload) => onUpdate(payload)
+      onUpdate
     )
     .subscribe();
 };
