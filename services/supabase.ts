@@ -2,16 +2,36 @@
 import { createClient } from '@supabase/supabase-js';
 import { ScheduleEvent, User } from '../types';
 
-// These should be set in your Vercel Environment Variables
-const supabaseUrl = process.env.SUPABASE_URL || 'https://your-project.supabase.co';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || 'your-anon-key';
+const getSupabase = () => {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+  if (!supabaseUrl || !supabaseKey) {
+    console.error("Supabase credentials missing. Please check your environment variables.");
+    return null;
+  }
+  return createClient(supabaseUrl, supabaseKey);
+};
+
+export const supabase = getSupabase();
+
+/**
+ * Ensures the circle (group) exists in the database
+ */
+export const ensureCircleInCloud = async (id: string, name: string) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('circles')
+    .upsert({ id, name }, { onConflict: 'id' });
+  
+  if (error) throw error;
+};
 
 /**
  * Ensures user profile exists in cloud
  */
 export const ensureUserInCloud = async (user: User, circleId: string) => {
+  if (!supabase) return;
   const { data, error } = await supabase
     .from('circle_users')
     .upsert({
@@ -32,10 +52,12 @@ export const ensureUserInCloud = async (user: User, circleId: string) => {
  * Fetches all circle data (users + events)
  */
 export const fetchCircleData = async (circleId: string) => {
+  if (!supabase) return { users: [], events: [], circleName: 'SyncCircle' };
   try {
-    const [uRes, eRes] = await Promise.all([
+    const [uRes, eRes, cRes] = await Promise.all([
       supabase.from('circle_users').select('*').eq('circle_id', circleId),
-      supabase.from('events').select('*').eq('circle_id', circleId)
+      supabase.from('events').select('*').eq('circle_id', circleId),
+      supabase.from('circles').select('name').eq('id', circleId).single()
     ]);
 
     if (uRes.error) throw uRes.error;
@@ -61,10 +83,10 @@ export const fetchCircleData = async (circleId: string) => {
       endDate: e.end_date
     }));
     
-    return { users, events };
+    return { users, events, circleName: cRes.data?.name || 'SyncCircle' };
   } catch (err) {
     console.error("Supabase Fetch Failed:", err);
-    return { users: [], events: [] };
+    return { users: [], events: [], circleName: 'SyncCircle' };
   }
 };
 
@@ -72,6 +94,7 @@ export const fetchCircleData = async (circleId: string) => {
  * Push single event to cloud
  */
 export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleId: string) => {
+  if (!supabase) return;
   const { data, error } = await supabase
     .from('events')
     .insert([{
@@ -94,6 +117,7 @@ export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleI
  * Delete event from cloud
  */
 export const deleteEventFromCloud = async (eventId: string) => {
+  if (!supabase) return;
   const { error } = await supabase
     .from('events')
     .delete()
@@ -105,6 +129,7 @@ export const deleteEventFromCloud = async (eventId: string) => {
  * Real-time subscription to circle updates
  */
 export const subscribeToCircle = (circleId: string, onUpdate: () => void) => {
+  if (!supabase) return { unsubscribe: () => {} };
   return supabase
     .channel(`circle-${circleId}`)
     .on(

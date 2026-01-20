@@ -11,8 +11,23 @@ import {
   syncEventToCloud, 
   subscribeToCircle, 
   ensureUserInCloud,
-  deleteEventFromCloud 
+  ensureCircleInCloud,
+  deleteEventFromCloud,
+  supabase
 } from './services/supabase';
+
+// Safe UUID generation
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback for older environments
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 const App: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(() => {
@@ -26,7 +41,6 @@ const App: React.FC = () => {
   const [view, setView] = useState<AppView>('calendar');
   const [currentDate] = useState<string>(new Date().toISOString().split('T')[0]);
   
-  // Per-session identity storage
   const [currentUser, setCurrentUser] = useState<string | null>(() => {
     if (!sessionId) return null;
     return localStorage.getItem(`synccircle_user_${sessionId}`);
@@ -39,9 +53,10 @@ const App: React.FC = () => {
   const loadCloudData = useCallback(async (id: string) => {
     setIsCloudSyncing(true);
     try {
-      const { users: cloudUsers, events: cloudEvents } = await fetchCircleData(id);
+      const { users: cloudUsers, events: cloudEvents, circleName } = await fetchCircleData(id);
       setUsers(cloudUsers);
       setEvents(cloudEvents);
+      setGroupName(circleName);
     } catch (e) {
       console.error("Cloud Fetch Error:", e);
     } finally {
@@ -50,18 +65,36 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !supabase) return;
     loadCloudData(sessionId);
     const subscription = subscribeToCircle(sessionId, () => loadCloudData(sessionId));
     return () => { subscription.unsubscribe(); };
   }, [sessionId, loadCloudData]);
 
+  if (!supabase) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-slate-900 p-10 text-center font-sans">
+        <div className="max-w-md bg-white p-12 rounded-[3rem] shadow-2xl">
+          <div className="w-16 h-16 bg-red-100 text-red-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h1 className="text-2xl font-black text-slate-900 mb-4 tracking-tight">Configuration Needed</h1>
+          <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+            The app can't connect to Supabase. Make sure you added <b>SUPABASE_URL</b> and <b>SUPABASE_ANON_KEY</b> to your environment variables.
+          </p>
+          <button onClick={() => window.location.reload()} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest">Retry Connection</button>
+        </div>
+      </div>
+    );
+  }
+
   const handleOnboard = async (userName: string, circleName: string, avatar?: string) => {
     setIsCloudSyncing(true);
-    const activeSessionId = sessionId || Math.random().toString(36).substr(2, 9);
+    const activeSessionId = sessionId || generateId();
+    const newUserId = generateId();
     
     const newUser: User = { 
-      id: Math.random().toString(36).substr(2, 9), 
+      id: newUserId, 
       name: userName, 
       color: COLORS[Math.floor(Math.random() * COLORS.length)], 
       active: true, 
@@ -70,7 +103,9 @@ const App: React.FC = () => {
     };
 
     try {
+      await ensureCircleInCloud(activeSessionId, circleName || 'SyncCircle');
       await ensureUserInCloud(newUser, activeSessionId);
+      
       localStorage.setItem(`synccircle_user_${activeSessionId}`, newUser.id);
       setGroupName(circleName || 'SyncCircle');
       setCurrentUser(newUser.id);
@@ -81,7 +116,7 @@ const App: React.FC = () => {
       await loadCloudData(activeSessionId);
     } catch (e) {
       console.error(e);
-      alert("Connection failed. Did you add your SUPABASE_URL and KEY to Vercel?");
+      alert("Check the console for errors. Usually this means the SQL script wasn't run or tables are missing.");
     } finally {
       setIsCloudSyncing(false);
     }
@@ -110,8 +145,6 @@ const App: React.FC = () => {
         onOpenProfile={() => setView('setup')}
         currentUser={currentUser}
         onNewCircle={() => {
-          const params = new URLSearchParams(window.location.search);
-          params.delete('group');
           window.location.href = window.location.origin + window.location.pathname;
         }}
       />
