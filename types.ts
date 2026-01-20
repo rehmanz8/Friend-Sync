@@ -17,7 +17,8 @@ export interface User {
   name: string;
   color: string;
   active: boolean;
-  timezone: string; // e.g., "Europe/London", "America/New_York"
+  timezone: string;
+  avatar?: string; // Base64 encoded profile picture
 }
 
 export type AppView = 'calendar' | 'setup';

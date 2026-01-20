@@ -8,16 +8,19 @@ import TimetableEntry from './components/TimetableEntry';
 import EventForm from './components/EventForm';
 import { getSmartSuggestions } from './services/gemini';
 
+interface RecentSession {
+  id: string;
+  name: string;
+  lastUsed: number;
+}
+
 const App: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get('group');
   });
 
-  const [groupName, setGroupName] = useState<string>(() => {
-    return localStorage.getItem(`synccircle_name_${sessionId}`) || 'Our Group';
-  });
-
+  const [groupName, setGroupName] = useState<string>('Our Circle');
   const [users, setUsers] = useState<User[]>([]);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [view, setView] = useState<AppView>('calendar');
@@ -26,271 +29,254 @@ const App: React.FC = () => {
   const [suggestions, setSuggestions] = useState<{ day: string; time: string; reason: string }[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [linkCopySuccess, setLinkCopySuccess] = useState(false);
+  const [showSyncModal, setShowSyncModal] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [syncCode, setSyncCode] = useState('');
   
-  // Single event editing state
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
-  const [isAddingSingle, setIsAddingSingle] = useState(false);
+  const [recentSessions, setRecentSessions] = useState<RecentSession[]>([]);
 
-  // Load data specific to this session
+  // Load master list of all local circles
   useEffect(() => {
-    if (!sessionId) return;
+    const saved = localStorage.getItem('synccircle_all_sessions');
+    if (saved) setRecentSessions(JSON.parse(saved));
+  }, []);
+
+  // Sync state with local storage whenever it changes
+  useEffect(() => {
+    if (!sessionId) {
+      setUsers([]);
+      setEvents([]);
+      return;
+    }
     
     const savedUsers = localStorage.getItem(`synccircle_users_${sessionId}`);
     const savedEvents = localStorage.getItem(`synccircle_events_${sessionId}`);
+    const savedName = localStorage.getItem(`synccircle_name_${sessionId}`);
+    
+    if (savedName) setGroupName(savedName);
     
     if (savedUsers) {
       const parsedUsers = JSON.parse(savedUsers);
       setUsers(parsedUsers);
-      if (parsedUsers.length > 0 && !currentUser) {
+      const lastUser = localStorage.getItem(`synccircle_lastuser_${sessionId}`);
+      if (lastUser && parsedUsers.find((u: User) => u.id === lastUser)) {
+        setCurrentUser(lastUser);
+      } else if (parsedUsers.length > 0) {
         setCurrentUser(parsedUsers[0].id);
       }
+    } else {
+      setUsers([]);
+      setEvents([]);
+      setCurrentUser(null);
     }
     
-    if (savedEvents) {
-      setEvents(JSON.parse(savedEvents));
-    }
+    if (savedEvents) setEvents(JSON.parse(savedEvents));
+
+    // Update the master session list
+    setRecentSessions(prev => {
+      const filtered = prev.filter(s => s.id !== sessionId);
+      const updated = [{ 
+        id: sessionId, 
+        name: savedName || groupName || 'Unnamed Circle', 
+        lastUsed: Date.now() 
+      }, ...filtered].slice(0, 15);
+      localStorage.setItem('synccircle_all_sessions', JSON.stringify(updated));
+      return updated;
+    });
   }, [sessionId]);
 
-  // Persist data for this session
+  // Persist current state to localStorage
   useEffect(() => {
     if (sessionId) {
       localStorage.setItem(`synccircle_users_${sessionId}`, JSON.stringify(users));
       localStorage.setItem(`synccircle_events_${sessionId}`, JSON.stringify(events));
       localStorage.setItem(`synccircle_name_${sessionId}`, groupName);
+      if (currentUser) {
+        localStorage.setItem(`synccircle_lastuser_${sessionId}`, currentUser);
+      }
     }
-  }, [users, events, sessionId, groupName]);
+  }, [users, events, sessionId, groupName, currentUser]);
 
-  const handleCreateSession = (gName: string, hName: string) => {
-    const id = Math.random().toString(36).substr(2, 8);
+  const handleCreateSession = (gName: string, hName: string, avatar?: string) => {
+    const id = sessionId || Math.random().toString(36).substr(2, 8);
     const defaultTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     
-    setGroupName(gName);
-    const initialUsers = [
-      { id: '1', name: hName || 'Host', color: COLORS[0], active: true, timezone: defaultTz }
-    ];
-    setUsers(initialUsers);
-    setCurrentUser('1');
-    setSessionId(id);
-    
-    const newUrl = `${window.location.origin}${window.location.pathname}?group=${id}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  };
-
-  const handleJoinSession = (id: string) => {
-    setSessionId(id);
-    const newUrl = `${window.location.origin}${window.location.pathname}?group=${id}`;
-    window.history.pushState({ path: newUrl }, '', newUrl);
-  };
-
-  const handleToggleUser = (id: string) => {
-    setUsers(users.map(u => u.id === id ? { ...u, active: !u.active } : u));
-  };
-
-  const handleToggleAll = (active: boolean) => {
-    setUsers(users.map(u => ({ ...u, active })));
-  };
-
-  const handleAddUser = (name: string) => {
-    const newUser: User = {
-      id: Math.random().toString(36).substr(2, 9),
-      name,
-      color: COLORS[users.length % COLORS.length],
-      active: true,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    const newUser = { 
+      id: Math.random().toString(36).substr(2, 9), 
+      name: hName, 
+      color: COLORS[users.length % COLORS.length], 
+      active: true, 
+      timezone: defaultTz,
+      avatar 
     };
-    setUsers([...users, newUser]);
+
+    if (sessionId && users.length > 0) {
+      // Joining an existing circle ID with a new local profile
+      setUsers(prev => [...prev, newUser]);
+    } else {
+      // Starting a brand new circle ID
+      setGroupName(gName);
+      setUsers([newUser]);
+    }
+    
     setCurrentUser(newUser.id);
+    setSessionId(id);
+    
+    const newUrl = `${window.location.origin}${window.location.pathname}?group=${id}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
   };
 
-  const handleUpdateUser = (id: string, updates: Partial<User>) => {
-    setUsers(users.map(u => u.id === id ? { ...u, ...updates } : u));
+  const handleSwitchSession = (id: string | null) => {
+    setSessionId(id);
+    const newUrl = id 
+      ? `${window.location.origin}${window.location.pathname}?group=${id}`
+      : `${window.location.origin}${window.location.pathname}`;
+    window.history.pushState({ path: newUrl }, '', newUrl);
   };
 
-  const handleDeleteUser = (id: string) => {
-    setUsers(users.filter(u => u.id !== id));
-    setEvents(events.filter(e => e.userId !== id));
-    if (currentUser === id) {
-      const remaining = users.filter(u => u.id !== id);
-      setCurrentUser(remaining.length > 0 ? remaining[0].id : null);
+  const handleImportData = () => {
+    try {
+      const data = JSON.parse(atob(syncCode));
+      if (data.users && data.events) {
+        // Advanced Merge: Combine existing users with new ones
+        const existingUserIds = new Set(users.map(u => u.id));
+        const mergedUsers = [...users];
+        
+        data.users.forEach((incomingUser: User) => {
+          if (!existingUserIds.has(incomingUser.id)) {
+            mergedUsers.push(incomingUser);
+          } else {
+            // Update existing users in case they changed their profile pic or name
+            const idx = mergedUsers.findIndex(u => u.id === incomingUser.id);
+            if (idx !== -1) mergedUsers[idx] = { ...mergedUsers[idx], ...incomingUser };
+          }
+        });
+        
+        // Advanced Merge: Combine existing events with new ones (avoid duplicates)
+        const existingEventIds = new Set(events.map(e => e.id));
+        const newEvents = data.events.filter((e: ScheduleEvent) => !existingEventIds.has(e.id));
+        
+        setUsers(mergedUsers);
+        setEvents([...events, ...newEvents]);
+        
+        setShowSyncModal(false);
+        setSyncCode('');
+        alert("Circle merged! You and your friends are now in the same calendar.");
+      }
+    } catch (e) {
+      alert("Invalid sync code. Please check that you copied the entire message from your friend.");
     }
   };
 
-  const handleBatchAddEvents = (newEvents: Omit<ScheduleEvent, 'id'>[], timezone: string) => {
-    const committedEvents = newEvents.map(e => ({
-      ...e,
-      id: Math.random().toString(36).substr(2, 9),
-    }));
-    
-    if (currentUser) {
-      setUsers(prev => prev.map(u => u.id === currentUser ? { ...u, timezone } : u));
-    }
-    
-    setEvents([...events, ...committedEvents]);
-    setView('calendar');
-  };
-
-  const handleAddSingleEvent = (eventData: Omit<ScheduleEvent, 'id'>) => {
-    const newEvent: ScheduleEvent = {
-      ...eventData,
-      id: Math.random().toString(36).substr(2, 9),
-    };
-    setEvents([...events, newEvent]);
-    setIsAddingSingle(false);
-  };
-
-  const handleUpdateEvent = (id: string, updates: Partial<ScheduleEvent>) => {
-    setEvents(events.map(e => e.id === id ? { ...e, ...updates } : e));
-    setEditingEvent(null);
-  };
-
-  const handleDeleteEvent = (id: string) => {
-    setEvents(events.filter(e => e.id !== id));
-  };
-
-  const fetchSuggestions = async () => {
-    setLoadingSuggestions(true);
-    const result = await getSmartSuggestions(users, events);
-    setSuggestions(result);
-    setLoadingSuggestions(false);
-  };
-
-  const copyShareLink = () => {
-    const url = `${window.location.origin}${window.location.pathname}?group=${sessionId}`;
-    navigator.clipboard.writeText(url);
+  const generateSyncCode = () => {
+    const data = { users, events };
+    const code = btoa(JSON.stringify(data));
+    navigator.clipboard.writeText(code);
     setCopySuccess(true);
     setTimeout(() => setCopySuccess(false), 2000);
   };
 
-  if (!sessionId) {
-    return <LandingScreen onCreate={handleCreateSession} onJoin={handleJoinSession} />;
+  const copyInviteLink = () => {
+    const url = `${window.location.origin}${window.location.pathname}?group=${sessionId}`;
+    navigator.clipboard.writeText(url);
+    setLinkCopySuccess(true);
+    setTimeout(() => setLinkCopySuccess(false), 2000);
+  };
+
+  if (!sessionId) return <LandingScreen onCreate={handleCreateSession} recentSessions={recentSessions} onSwitch={handleSwitchSession} />;
+
+  // User is joining via link but doesn't have a local profile yet
+  if (sessionId && users.length === 0) {
+    return <LandingScreen onCreate={handleCreateSession} recentSessions={[]} onSwitch={handleSwitchSession} isJoining />;
   }
 
   const currentUserObj = users.find(u => u.id === currentUser);
 
   return (
-    <div className="flex h-screen w-full bg-[#f8fafc] overflow-hidden font-sans selection:bg-blue-100">
+    <div className="flex h-screen w-full bg-[#f8fafc] overflow-hidden font-sans">
       <Sidebar 
         users={users} 
-        onToggleUser={handleToggleUser} 
-        onToggleAll={handleToggleAll}
-        onAddUser={handleAddUser}
-        onUpdateUser={handleUpdateUser}
-        onDeleteUser={handleDeleteUser}
+        onToggleUser={(id) => setUsers(users.map(u => u.id === id ? { ...u, active: !u.active } : u))} 
+        onToggleAll={(active) => setUsers(users.map(u => ({ ...u, active })))}
+        onAddUser={(name, avatar) => {
+          const newUser: User = { 
+            id: Math.random().toString(36).substr(2, 9), 
+            name, 
+            avatar,
+            color: COLORS[users.length % COLORS.length], 
+            active: true, 
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone 
+          };
+          setUsers([...users, newUser]);
+          setCurrentUser(newUser.id);
+        }}
+        onUpdateUser={(id, updates) => setUsers(users.map(u => u.id === id ? { ...u, ...updates } : u))}
+        onDeleteUser={(id) => {
+          if (confirm(`Remove this profile? This will hide their schedule on your device.`)) {
+            setUsers(users.filter(u => u.id !== id));
+            setEvents(events.filter(e => e.userId !== id));
+            if (currentUser === id) setCurrentUser(null);
+          }
+        }}
         onSelectCurrentUser={setCurrentUser}
+        onOpenProfile={() => setShowProfileModal(true)}
         currentUser={currentUser}
+        onNewCircle={() => handleSwitchSession(null)}
       />
-
+      
       <main className="flex-1 flex flex-col h-full overflow-hidden">
         <header className="h-20 px-8 flex items-center justify-between z-10 bg-white/40 backdrop-blur-xl border-b border-slate-200/60">
-          <div className="flex items-center gap-6">
-            <div className="flex flex-col">
-              <h2 className="text-xl font-black text-slate-800 tracking-tight">
-                {view === 'calendar' ? `${groupName} • Calendar` : 'Add Timetable Studio'}
-              </h2>
-              {view === 'calendar' && (
-                <div className="flex items-center gap-3 mt-0.5">
-                   <div className="relative group">
-                     <input 
-                      type="date" 
-                      value={currentDate} 
-                      onChange={(e) => setCurrentDate(e.target.value)}
-                      className="text-[11px] font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-full border-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer hover:bg-blue-100 transition-all uppercase tracking-wider"
-                    />
-                   </div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold tracking-widest opacity-60">Focusing Week</span>
-                </div>
-              )}
+          <div className="flex flex-col">
+            <h2 className="text-xl font-black text-slate-800 tracking-tight">{view === 'calendar' ? groupName : 'Timetable Studio'}</h2>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-[9px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-blue-50 text-blue-600">
+                Peer-to-Peer Circle
+              </span>
+              <button onClick={() => setShowSyncModal(true)} className="text-[10px] text-slate-400 font-bold hover:text-blue-600 transition-colors uppercase tracking-widest">Share & Sync Updates</button>
             </div>
           </div>
-
+          
           <div className="flex items-center gap-4">
-            <button
-              onClick={copyShareLink}
-              className="group flex items-center gap-2 px-4 py-2.5 bg-white text-slate-600 rounded-2xl hover:bg-slate-50 transition-all font-bold text-sm border border-slate-200/80 shadow-sm active:scale-95"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 opacity-50 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 100-2.684 3 3 0 000 2.684zm0 12.684a3 3 0 100-2.684 3 3 0 000 2.684z" />
-              </svg>
-              {copySuccess ? 'Copied Link' : 'Invite Friend'}
-            </button>
-            
-            {view === 'calendar' ? (
-              <>
-                <button
-                  onClick={fetchSuggestions}
-                  disabled={loadingSuggestions}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all font-bold text-sm shadow-lg shadow-indigo-100 disabled:opacity-50 active:scale-95 border border-indigo-500/20"
-                >
-                  <span className="text-base leading-none">✨</span>
-                  {loadingSuggestions ? 'Calculating...' : 'AI Insights'}
-                </button>
-                <div className="h-8 w-px bg-slate-200" />
-                
-                <div className="flex gap-2">
-                   <button
-                    disabled={!currentUser}
-                    onClick={() => setIsAddingSingle(true)}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-white text-slate-800 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-all font-bold text-sm shadow-sm active:scale-95"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add One
-                  </button>
-                  <button
-                    disabled={!currentUser}
-                    onClick={() => setView('setup')}
-                    className="flex items-center gap-2 px-6 py-2.5 bg-slate-900 text-white rounded-2xl hover:bg-slate-800 transition-all font-black text-sm shadow-xl shadow-slate-200 disabled:opacity-50 active:scale-95"
-                  >
-                    <span>Add Timetable</span>
-                  </button>
-                </div>
-              </>
-            ) : (
-              <button
-                onClick={() => setView('calendar')}
-                className="px-6 py-2.5 bg-slate-100 text-slate-500 font-bold hover:bg-slate-200 rounded-2xl transition-all text-sm"
-              >
-                Back to Calendar
-              </button>
-            )}
+             {view === 'calendar' ? (
+               <>
+                 <input type="date" value={currentDate} onChange={(e) => setCurrentDate(e.target.value)} className="bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-black text-slate-600 outline-none hover:border-slate-300 transition-all shadow-sm" />
+                 <button onClick={async () => { setLoadingSuggestions(true); const s = await getSmartSuggestions(users, events); setSuggestions(s); setLoadingSuggestions(false); }} disabled={loadingSuggestions} className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-2xl hover:bg-indigo-700 transition-all font-bold text-sm shadow-lg shadow-indigo-100 disabled:opacity-50">✨ AI Suggestions</button>
+                 <button disabled={!currentUser} onClick={() => setView('setup')} className="px-6 py-2.5 bg-slate-900 text-white rounded-2xl font-black text-sm hover:bg-black transition-all shadow-lg shadow-slate-200">Add My Schedule</button>
+               </>
+             ) : (
+               <button onClick={() => setView('calendar')} className="px-6 py-2.5 bg-slate-100 text-slate-500 font-bold rounded-2xl hover:bg-slate-200 transition-all">Back to Circle</button>
+             )}
           </div>
         </header>
 
-        <div className="flex-1 p-8 flex gap-8 min-h-0 bg-slate-50/50 relative">
+        <div className="flex-1 p-8 bg-slate-50/50 overflow-hidden flex gap-6">
           {view === 'calendar' ? (
             <>
               <div className="flex-1 min-w-0">
                 <CalendarGrid 
                   users={users} 
                   events={events} 
-                  onDeleteEvent={handleDeleteEvent}
-                  onEditEvent={setEditingEvent}
-                  currentDate={new Date(currentDate)}
+                  onDeleteEvent={(id) => setEvents(events.filter(e => e.id !== id))} 
+                  onEditEvent={setEditingEvent} 
+                  currentDate={new Date(currentDate)} 
                 />
               </div>
-
               {suggestions.length > 0 && (
-                <aside className="w-80 bg-white rounded-[2.5rem] border border-slate-200/60 shadow-2xl p-7 overflow-y-auto animate-in slide-in-from-right-8 duration-500 flex flex-col">
-                  <div className="flex items-center justify-between mb-8">
-                    <div>
-                      <h3 className="font-black text-slate-800 text-lg">Smart Slots</h3>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Based on availability</p>
-                    </div>
-                    <button onClick={() => setSuggestions([])} className="text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-50 rounded-xl transition-all">
-                       <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    </button>
+                <aside className="w-80 bg-white rounded-[2.5rem] border border-slate-200 p-8 overflow-y-auto animate-in slide-in-from-right-8 duration-500 shadow-xl">
+                  <div className="flex justify-between items-center mb-8">
+                    <h3 className="font-black text-slate-900 text-lg">Smart Slots</h3>
+                    <button onClick={() => setSuggestions([])} className="text-slate-300 hover:text-slate-900 transition-colors">✕</button>
                   </div>
-                  <div className="space-y-6 flex-1">
+                  <div className="space-y-6">
                     {suggestions.map((s, i) => (
-                      <div key={i} className="group p-5 bg-[#fafbff] rounded-3xl border border-slate-100 hover:border-indigo-100 hover:shadow-xl hover:shadow-indigo-50/50 transition-all duration-300">
+                      <div key={i} className="p-6 bg-indigo-50/50 rounded-3xl border border-indigo-100">
                         <div className="flex justify-between items-start mb-3">
-                          <span className="font-black text-slate-900 text-sm tracking-tight">{s.day}</span>
-                          <span className="text-[11px] font-black bg-indigo-600 text-white px-3 py-1 rounded-full shadow-sm shadow-indigo-100">{s.time}</span>
+                          <span className="font-black text-indigo-900 text-sm">{s.day}</span>
+                          <span className="text-[10px] font-black bg-indigo-600 text-white px-3 py-1 rounded-full">{s.time}</span>
                         </div>
-                        <p className="text-xs text-slate-500 leading-relaxed font-medium group-hover:text-slate-700 transition-colors">"{s.reason}"</p>
+                        <p className="text-xs text-indigo-700 leading-relaxed font-medium">"{s.reason}"</p>
                       </div>
                     ))}
                   </div>
@@ -298,12 +284,17 @@ const App: React.FC = () => {
               )}
             </>
           ) : (
-            <div className="w-full h-full flex items-center justify-center">
+            <div className="w-full flex items-center justify-center">
               {currentUserObj && (
                 <TimetableEntry 
-                  currentUser={currentUserObj}
-                  onAddBatch={handleBatchAddEvents}
-                  onCancel={() => setView('calendar')}
+                  currentUser={currentUserObj} 
+                  onAddBatch={(newEvents, tz) => {
+                    const committed = newEvents.map(e => ({ ...e, id: Math.random().toString(36).substr(2, 9) }));
+                    setEvents([...events, ...committed]);
+                    setUsers(users.map(u => u.id === currentUser ? { ...u, timezone: tz } : u));
+                    setView('calendar');
+                  }} 
+                  onCancel={() => setView('calendar')} 
                 />
               )}
             </div>
@@ -311,92 +302,247 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Modals for Single Add/Edit */}
-      {(isAddingSingle && currentUser) && (
-        <EventForm 
-          userId={currentUser}
-          onAdd={handleAddSingleEvent}
-          onClose={() => setIsAddingSingle(false)}
+      {/* Sync Modal */}
+      {showSyncModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[150] p-4">
+          <div className="bg-white rounded-[3.5rem] p-12 w-full max-w-xl shadow-2xl overflow-y-auto max-h-[90vh] border border-slate-100 animate-in zoom-in-95 duration-300">
+            <h3 className="text-3xl font-black text-slate-900 mb-2 tracking-tighter text-center">Sync Schedules</h3>
+            <p className="text-sm text-slate-500 mb-8 font-medium text-center">
+              This app is private and local. To see each other's schedules, you must exchange Sync Codes.
+            </p>
+            
+            <div className="space-y-10">
+              <section className="space-y-4">
+                <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-1">Step 1: Invite your Friend</label>
+                <button onClick={copyInviteLink} className="w-full py-5 bg-blue-50 text-blue-600 rounded-[1.8rem] font-black text-xs uppercase tracking-widest hover:bg-blue-100 transition-all flex items-center justify-center gap-3">
+                    {linkCopySuccess ? 'Link Copied!' : 'Copy Invite Link'}
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                </button>
+                <p className="text-[10px] text-slate-400 text-center font-medium italic">Send this link to your friend first so they join the same Room ID.</p>
+              </section>
+
+              <div className="h-px bg-slate-100 w-full" />
+
+              <section className="space-y-4">
+                <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-1">Step 2: Sync Your Content</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <button onClick={generateSyncCode} className="py-5 bg-indigo-600 text-white rounded-[1.8rem] font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all shadow-lg shadow-indigo-100 flex flex-col items-center gap-2">
+                      <span className="text-[9px] opacity-70">Push Updates</span>
+                      {copySuccess ? 'Code Copied!' : 'Copy My Sync Code'}
+                  </button>
+                  <button onClick={handleImportData} className="py-5 bg-slate-900 text-white rounded-[1.8rem] font-black text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-200 flex flex-col items-center gap-2">
+                      <span className="text-[9px] opacity-70">Pull Updates</span>
+                      Sync Friend's Code
+                  </button>
+                </div>
+                <textarea 
+                    className="w-full h-32 p-6 bg-slate-50 border border-slate-100 rounded-[2rem] text-[10px] font-mono outline-none focus:ring-4 focus:ring-blue-500/10 transition-all resize-none shadow-inner"
+                    placeholder="Paste your friend's code here to see their schedule on your screen..."
+                    value={syncCode}
+                    onChange={(e) => setSyncCode(e.target.value)}
+                 />
+                <p className="text-[10px] text-slate-400 text-center font-medium">Both users should exchange codes to see each other's latest changes.</p>
+              </section>
+
+              <button onClick={() => setShowSyncModal(false)} className="w-full py-5 text-slate-400 font-black rounded-2xl text-[10px] uppercase tracking-[0.2em] border border-slate-100 hover:bg-slate-50 transition-all">Back to Calendar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProfileModal && currentUserObj && (
+        <ProfileModal 
+          user={currentUserObj} 
+          onUpdate={(updates) => {
+            setUsers(users.map(u => u.id === currentUser ? { ...u, ...updates } : u));
+            setShowProfileModal(false);
+          }} 
+          onClose={() => setShowProfileModal(false)} 
         />
       )}
+
       {editingEvent && (
         <EventForm 
-          userId={editingEvent.userId}
-          initialData={editingEvent}
-          onAdd={(data) => handleUpdateEvent(editingEvent.id, data)}
-          onClose={() => setEditingEvent(null)}
-          isEdit
+          userId={editingEvent.userId} 
+          initialData={editingEvent} 
+          onAdd={(data) => {
+            setEvents(events.map(e => e.id === editingEvent.id ? { ...e, ...data } : e));
+            setEditingEvent(null);
+          }} 
+          onClose={() => setEditingEvent(null)} 
+          isEdit 
         />
       )}
     </div>
   );
 };
 
-const LandingScreen: React.FC<{ onCreate: (gName: string, hName: string) => void; onJoin: (id: string) => void }> = ({ onCreate, onJoin }) => {
-  const [gName, setGName] = useState('');
-  const [hName, setHName] = useState('');
-  const [joinId, setJoinId] = useState('');
+const ProfileModal: React.FC<{ user: User, onUpdate: (updates: Partial<User>) => void, onClose: () => void }> = ({ user, onUpdate, onClose }) => {
+  const [name, setName] = useState(user.name);
+  const [avatar, setAvatar] = useState(user.avatar);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const handleAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 300;
+          canvas.height = 300;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, 300, 300);
+          setAvatar(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = ev.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-[#f0f2f5] relative overflow-hidden">
-      {/* Decorative Orbs */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-400/20 blur-[120px] rounded-full animate-pulse" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-indigo-400/20 blur-[120px] rounded-full" />
-
-      <div className="max-w-4xl w-full px-6 grid grid-cols-1 md:grid-cols-2 gap-8 z-10">
-        <div className="flex flex-col justify-center space-y-6 p-10 bg-white/60 backdrop-blur-3xl rounded-[3rem] border border-white/40 shadow-2xl">
-          <div className="w-16 h-16 bg-blue-600 rounded-3xl flex items-center justify-center text-white shadow-xl shadow-blue-200">
-             <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
-             </svg>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[200] p-4">
+      <div className="bg-white rounded-[3.5rem] p-12 w-full max-w-md shadow-2xl animate-in zoom-in-95 duration-300 border border-slate-100">
+        <h3 className="text-3xl font-black text-slate-900 mb-10 tracking-tighter text-center">My Identity</h3>
+        <div className="space-y-8">
+          <div className="flex flex-col items-center gap-6">
+             <div onClick={() => fileRef.current?.click()} className="w-40 h-40 rounded-full bg-slate-50 border-8 border-white shadow-2xl overflow-hidden cursor-pointer hover:scale-105 transition-all group relative shrink-0">
+                {avatar ? (
+                  <img src={avatar} className="w-full h-full object-cover aspect-square" alt="Profile" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-slate-300 bg-slate-100">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                   <span className="text-xs font-black text-white uppercase tracking-widest">Update Photo</span>
+                </div>
+             </div>
+             <input type="file" ref={fileRef} onChange={handleAvatar} className="hidden" accept="image/*" />
           </div>
-          <h2 className="text-4xl font-black text-slate-900 tracking-tighter">Start a Group</h2>
-          <p className="text-slate-500 text-sm leading-relaxed">Create a fresh space for you and your friends to sync schedules.</p>
-          <div className="space-y-4">
-            <input 
-              className="w-full p-4 rounded-2xl bg-white border-slate-100 shadow-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 font-bold text-slate-700 outline-none transition-all"
-              placeholder="Your Name (Host)..."
-              value={hName}
-              onChange={(e) => setHName(e.target.value)}
-            />
-            <input 
-              className="w-full p-4 rounded-2xl bg-white border-slate-100 shadow-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 font-bold text-slate-700 outline-none transition-all"
-              placeholder="Group Name (e.g. Squad)..."
-              value={gName}
-              onChange={(e) => setGName(e.target.value)}
-            />
-            <button 
-              onClick={() => gName && hName && onCreate(gName, hName)}
-              disabled={!gName || !hName}
-              className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-[0.98] disabled:opacity-50"
-            >
-              Host Session
-            </button>
+          <div className="space-y-3">
+            <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Display Name</label>
+            <input className="w-full p-5 rounded-3xl bg-slate-50 border-none ring-1 ring-slate-100 font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="flex gap-4 pt-4">
+            <button onClick={onClose} className="flex-1 py-5 bg-slate-50 text-slate-400 font-black rounded-3xl text-[10px] uppercase tracking-widest">Cancel</button>
+            <button onClick={() => onUpdate({ name, avatar })} className="flex-1 py-5 bg-blue-600 text-white font-black rounded-3xl text-[10px] uppercase tracking-widest shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all">Save Changes</button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        <div className="flex flex-col justify-center space-y-6 p-10 bg-slate-900 rounded-[3rem] shadow-2xl text-white">
-          <div className="w-16 h-16 bg-white/10 rounded-3xl flex items-center justify-center text-white border border-white/10">
-             <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-             </svg>
+const LandingScreen: React.FC<{ 
+  onCreate: (gName: string, hName: string, avatar?: string) => void, 
+  recentSessions: RecentSession[],
+  onSwitch: (id: string | null) => void,
+  isJoining?: boolean
+}> = ({ onCreate, recentSessions, onSwitch, isJoining }) => {
+  const [gName, setGName] = useState('');
+  const [hName, setHName] = useState('');
+  const [avatar, setAvatar] = useState<string | undefined>();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleAvatar = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 300;
+          canvas.height = 300;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, 300, 300);
+          setAvatar(canvas.toDataURL('image/jpeg', 0.85));
+        };
+        img.src = ev.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <div className="h-screen w-full flex items-center justify-center bg-[#f4f7f9] p-6 relative overflow-hidden">
+      <div className="absolute top-[-30%] right-[-10%] w-[70%] h-[70%] bg-blue-400/5 blur-[220px] rounded-full" />
+      <div className="absolute bottom-[-30%] left-[-10%] w-[70%] h-[70%] bg-indigo-400/5 blur-[220px] rounded-full" />
+      
+      <div className="max-w-6xl w-full grid grid-cols-1 md:grid-cols-2 gap-10 z-10 animate-in fade-in slide-in-from-bottom-12 duration-700">
+        {!isJoining && (
+          <div className="bg-white/60 backdrop-blur-3xl p-14 rounded-[5rem] border border-white/50 shadow-2xl flex flex-col justify-center min-h-[650px]">
+            <h2 className="text-4xl font-black text-slate-900 mb-4 tracking-tighter">Circle Hub</h2>
+            <p className="text-sm font-medium text-slate-500 mb-12">Access all your collaborative spaces from this device.</p>
+            <div className="space-y-4 max-h-[450px] overflow-y-auto pr-4 custom-scrollbar">
+              {recentSessions.length > 0 ? recentSessions.map(s => (
+                <button key={s.id} onClick={() => onSwitch(s.id)} className="w-full flex items-center justify-between p-6 bg-white rounded-[2.8rem] border border-slate-100 hover:border-blue-300 transition-all group shadow-sm hover:shadow-2xl hover:-translate-y-1">
+                  <div className="flex items-center gap-5">
+                    <div className="w-14 h-14 bg-gradient-to-tr from-blue-50 to-indigo-50 text-blue-600 rounded-2xl flex items-center justify-center font-black text-xl border border-blue-100/50">{s.name.charAt(0)}</div>
+                    <div className="text-left">
+                      <p className="text-lg font-black text-slate-800 leading-tight">{s.name}</p>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Room ID: {s.id}</p>
+                    </div>
+                  </div>
+                  <div className="w-12 h-12 rounded-full bg-slate-50 flex items-center justify-center text-slate-300 group-hover:bg-blue-600 group-hover:text-white transition-all shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" /></svg>
+                  </div>
+                </button>
+              )) : (
+                <div className="py-24 text-center border-4 border-dashed border-slate-200/40 rounded-[3.5rem]">
+                   <p className="text-[12px] font-black text-slate-300 uppercase tracking-[0.4em] leading-loose">No active circles yet.<br/>Start one on the right! →</p>
+                </div>
+              )}
+            </div>
           </div>
-          <h2 className="text-4xl font-black tracking-tighter">Join a Group</h2>
-          <p className="text-slate-400 text-sm leading-relaxed">Enter an invite code to join a friend's group.</p>
-          <div className="space-y-4">
-            <input 
-              className="w-full p-4 rounded-2xl bg-white/10 border-white/10 shadow-sm focus:ring-4 focus:ring-blue-500/20 focus:bg-white/20 font-bold text-white outline-none transition-all placeholder:text-slate-600"
-              placeholder="Enter Group ID..."
-              value={joinId}
-              onChange={(e) => setJoinId(e.target.value)}
-            />
+        )}
+
+        <div className={`${isJoining ? 'md:col-span-2 max-w-xl mx-auto' : ''} bg-white p-14 rounded-[5rem] shadow-2xl border border-slate-100 flex flex-col justify-center text-center relative animate-in zoom-in-95 duration-500`}>
+          <div onClick={() => fileInputRef.current?.click()} className="w-40 h-40 bg-slate-50 rounded-full mx-auto mb-10 cursor-pointer hover:scale-105 transition-all flex items-center justify-center border-8 border-white shadow-2xl overflow-hidden group relative shrink-0">
+            {avatar ? (
+              <img src={avatar} className="w-full h-full object-cover aspect-square" alt="Preview" />
+            ) : (
+              <div className="text-slate-200 group-hover:text-blue-400 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+              </div>
+            )}
+            <div className="absolute inset-0 bg-blue-600/10 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+               <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-lg"><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-blue-600" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M10 5a1 1 0 011 1v3h3a1 1 0 110 2h-3v3a1 1 0 11-2 0v-3H6a1 1 0 110-2h3V6a1 1 0 011-1z" clipRule="evenodd" /></svg></div>
+            </div>
+          </div>
+          <input type="file" ref={fileInputRef} onChange={handleAvatar} className="hidden" accept="image/*" />
+          
+          <h2 className="text-4xl font-black text-slate-900 mb-3 tracking-tighter leading-none">
+            {isJoining ? 'Join Friend\'s Circle' : 'Start Fresh Circle'}
+          </h2>
+          <p className="text-slate-400 text-sm font-medium mb-12 px-6">
+            {isJoining ? 'Pick a name and photo to introduce yourself to this group.' : 'Coordinate schedules instantly with friends in a shared room.'}
+          </p>
+          
+          <div className="space-y-6 text-left">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">My Profile Name</label>
+              <input className="w-full p-6 rounded-[2rem] bg-slate-50 border-none ring-1 ring-slate-100 font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" placeholder="e.g. Alice Smith" value={hName} onChange={(e) => setHName(e.target.value)} />
+            </div>
+            {!isJoining && (
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Room Label</label>
+                <input className="w-full p-6 rounded-[2rem] bg-slate-50 border-none ring-1 ring-slate-100 font-bold text-sm outline-none focus:ring-4 focus:ring-blue-500/10 transition-all" placeholder="e.g. Weekend Crew" value={gName} onChange={(e) => setGName(e.target.value)} />
+              </div>
+            )}
             <button 
-              onClick={() => joinId && onJoin(joinId)}
-              disabled={!joinId}
-              className="w-full py-5 bg-white text-slate-900 rounded-2xl font-black shadow-xl hover:bg-slate-100 transition-all active:scale-[0.98] disabled:opacity-50"
+              onClick={() => onCreate(isJoining ? 'Our Circle' : gName, hName, avatar)} 
+              disabled={(!isJoining && !gName) || !hName} 
+              className="w-full py-6 bg-blue-600 text-white rounded-[2.5rem] font-black text-lg shadow-2xl shadow-blue-100 hover:bg-blue-700 transition-all active:scale-95 disabled:opacity-50 mt-8"
             >
-              Sync Timeline
+              {isJoining ? 'Enter Shared Room' : 'Initialize Circle'}
             </button>
+            {isJoining && (
+              <button onClick={() => onSwitch(null)} className="w-full py-4 text-slate-400 font-bold text-[10px] uppercase tracking-[0.3em] hover:text-slate-600 transition-colors">Return to Hub</button>
+            )}
           </div>
         </div>
       </div>
