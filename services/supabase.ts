@@ -2,24 +2,46 @@
 import { createClient } from '@supabase/supabase-js';
 import { ScheduleEvent, User } from '../types';
 
-const getSupabase = () => {
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_ANON_KEY;
+/**
+ * Safely get environment variables without crashing the browser
+ */
+const getEnv = (key: string) => {
+  try {
+    // Check global process object (standard in Vercel/Node envs)
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env[key];
+    }
+    // Check for standard bundler injection (Vite/ESBuild)
+    if ((window as any).import?.meta?.env) {
+      return (window as any).import.meta.env[key];
+    }
+  } catch (e) {
+    console.warn(`Could not safely read env key: ${key}`);
+  }
+  return '';
+};
 
-  if (!supabaseUrl || !supabaseKey) {
-    console.error("Supabase credentials missing. Please check your environment variables.");
+const getSupabase = () => {
+  const url = getEnv('SUPABASE_URL');
+  const key = getEnv('SUPABASE_ANON_KEY');
+
+  if (!url || !key) {
+    console.error("Supabase credentials missing. App will run in fallback mode.");
     return null;
   }
-  return createClient(supabaseUrl, supabaseKey);
+
+  try {
+    return createClient(url, key);
+  } catch (err) {
+    console.error("Supabase Initialization Failed:", err);
+    return null;
+  }
 };
 
 export const supabase = getSupabase();
 
-/**
- * Ensures the circle (group) exists in the database
- */
 export const ensureCircleInCloud = async (id: string, name: string) => {
-  if (!supabase) return;
+  if (!supabase) throw new Error("Database connection not configured.");
   const { error } = await supabase
     .from('circles')
     .upsert({ id, name }, { onConflict: 'id' });
@@ -27,11 +49,8 @@ export const ensureCircleInCloud = async (id: string, name: string) => {
   if (error) throw error;
 };
 
-/**
- * Ensures user profile exists in cloud
- */
 export const ensureUserInCloud = async (user: User, circleId: string) => {
-  if (!supabase) return;
+  if (!supabase) throw new Error("Database connection not configured.");
   const { data, error } = await supabase
     .from('circle_users')
     .upsert({
@@ -48,9 +67,6 @@ export const ensureUserInCloud = async (user: User, circleId: string) => {
   return data?.[0];
 };
 
-/**
- * Fetches all circle data (users + events)
- */
 export const fetchCircleData = async (circleId: string) => {
   if (!supabase) return { users: [], events: [], circleName: 'SyncCircle' };
   try {
@@ -90,11 +106,8 @@ export const fetchCircleData = async (circleId: string) => {
   }
 };
 
-/**
- * Push single event to cloud
- */
 export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleId: string) => {
-  if (!supabase) return;
+  if (!supabase) throw new Error("Database connection not configured.");
   const { data, error } = await supabase
     .from('events')
     .insert([{
@@ -113,9 +126,6 @@ export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleI
   return data?.[0];
 };
 
-/**
- * Delete event from cloud
- */
 export const deleteEventFromCloud = async (eventId: string) => {
   if (!supabase) return;
   const { error } = await supabase
@@ -125,9 +135,6 @@ export const deleteEventFromCloud = async (eventId: string) => {
   if (error) throw error;
 };
 
-/**
- * Real-time subscription to circle updates
- */
 export const subscribeToCircle = (circleId: string, onUpdate: () => void) => {
   if (!supabase) return { unsubscribe: () => {} };
   return supabase

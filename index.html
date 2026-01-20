@@ -27,6 +27,20 @@
           border-radius: inherit;
           animation: pulse-ring 1.25s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
         }
+
+        #crash-screen {
+          display: none;
+          position: fixed;
+          inset: 0;
+          background: #0f172a;
+          color: white;
+          padding: 2rem;
+          z-index: 9999;
+          font-family: monospace;
+          align-items: center;
+          justify-content: center;
+          flex-direction: column;
+        }
     </style>
 <script type="importmap">
 {
@@ -39,8 +53,26 @@
   }
 }
 </script>
+<script>
+  // Emergency error capture
+  window.onerror = function(msg, url, line, col, error) {
+    const crash = document.getElementById('crash-screen');
+    const msgEl = document.getElementById('crash-message');
+    if (crash && msgEl) {
+      crash.style.display = 'flex';
+      msgEl.innerText = msg + '\nAt: ' + line + ':' + col;
+    }
+    return false;
+  };
+</script>
 </head>
 <body class="bg-slate-50 text-slate-900">
     <div id="root"></div>
+    <div id="crash-screen">
+      <h1 style="color: #ef4444; font-weight: 900; margin-bottom: 1rem;">FATAL STARTUP ERROR</h1>
+      <p style="margin-bottom: 2rem; opacity: 0.7;">The app crashed before it could load. Please check your Supabase credentials.</p>
+      <pre id="crash-message" style="background: #1e293b; padding: 1.5rem; border-radius: 1rem; border: 1px solid #334155; width: 100%; max-width: 600px; overflow-x: auto;"></pre>
+      <button onclick="window.location.reload()" style="margin-top: 2rem; padding: 1rem 2rem; background: white; color: black; border-radius: 0.5rem; font-weight: bold; cursor: pointer;">Retry Application</button>
+    </div>
 </body>
 </html>
