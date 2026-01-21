@@ -2,6 +2,7 @@
   "name": "SyncCircle - Shared Friend Schedules",
   "description": "A collaborative scheduling tool for friends to coordinate free time, featuring AI-powered meeting suggestions and a high-visibility weekly timetable.",
   "requestFramePermissions": [
-    "camera"
+    "camera",
+    "microphone"
   ]
 }
