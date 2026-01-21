@@ -105,7 +105,7 @@ const App: React.FC = () => {
       window.history.pushState({}, '', `?group=${newSessionId}`);
       await loadData(newSessionId);
     } catch (e) {
-      alert("Cloud Sync failed. Check connection.");
+      alert("Synchronization failed. Ensure you have run the SQL setup in your database dashboard.");
     } finally {
       setIsCloudSyncing(false);
     }
@@ -160,8 +160,10 @@ const App: React.FC = () => {
     if (!sessionId) return;
     const magicLink = generateSuperLink(sessionId);
     navigator.clipboard.writeText(magicLink);
-    alert('Magic Link Copied! Send this to your friends for an instant live experience.');
+    alert('Magic Link Copied! Send this to friends—they skip setup and join your live room instantly.');
   };
+
+  // --- RENDERING LOGIC ---
 
   if (!isSyncConfigured && !sessionId) {
     return (
@@ -258,9 +260,9 @@ const App: React.FC = () => {
 
       {showJoinModal && (
         <div className="fixed inset-0 z-[150] bg-slate-950/80 backdrop-blur-2xl flex items-center justify-center p-8 animate-in fade-in">
-          <div className="w-full max-w-md bg-slate-900 rounded-[3rem] p-12 border border-white/5 shadow-2xl">
-            <h2 className="text-2xl font-black text-white tracking-tighter mb-2 text-center">Join Circle</h2>
-            <p className="text-slate-500 text-sm font-medium mb-8 text-center">Enter a Room ID to join your friends.</p>
+          <div className="w-full max-w-md bg-slate-900 rounded-[3rem] p-12 border border-white/5 shadow-2xl text-center">
+            <h2 className="text-2xl font-black text-white tracking-tighter mb-2">Join Room</h2>
+            <p className="text-slate-500 text-sm font-medium mb-8">Enter the Room ID shared by your friend.</p>
             <input 
               id="join-code-input"
               className="w-full p-6 bg-white/5 border border-white/10 rounded-2xl font-mono font-bold text-center mb-6 outline-none focus:ring-4 focus:ring-indigo-500/20 text-indigo-400"
@@ -287,31 +289,73 @@ const App: React.FC = () => {
 
 const ActivationScreen: React.FC<{ onActivate: (url: string, key: string) => void }> = ({ onActivate }) => {
   const [showGuide, setShowGuide] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const sqlSetup = `
+-- 1. Create circles table
+create table circles (
+  id uuid primary key,
+  name text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 2. Create circle_users table
+create table circle_users (
+  id uuid primary key,
+  circle_id uuid references circles(id) on delete cascade,
+  name text not null,
+  color text,
+  avatar_url text,
+  timezone text,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 3. Create events table
+create table events (
+  id uuid primary key default gen_random_uuid(),
+  circle_id uuid references circles(id) on delete cascade,
+  user_id uuid,
+  title text not null,
+  day integer not null,
+  start_time integer not null,
+  duration integer not null,
+  start_date date,
+  end_date date,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- 4. Enable Realtime for all tables
+alter publication supabase_realtime add table circles, circle_users, events;
+  `.trim();
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(sqlSetup);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
-    <div className="h-screen w-full flex items-center justify-center bg-slate-950 p-6 font-sans overflow-y-auto">
-      <div className="max-w-4xl w-full flex flex-col md:flex-row gap-8 animate-in zoom-in-95">
+    <div className="h-screen w-full flex items-center justify-center bg-slate-950 p-6 font-sans overflow-y-auto custom-scrollbar">
+      <div className={`max-w-5xl w-full flex flex-col ${showGuide ? 'md:flex-row' : 'items-center'} gap-8 transition-all duration-700`}>
         
-        {/* Main Activation Card */}
-        <div className="flex-1 bg-slate-900 border border-white/5 rounded-[3.5rem] p-10 md:p-14 shadow-2xl space-y-10">
+        {/* Connection Form */}
+        <div className="max-w-md w-full bg-slate-900 border border-white/5 rounded-[3.5rem] p-12 shadow-2xl space-y-10 animate-in zoom-in-95 shrink-0">
           <div className="text-center">
             <div className="w-16 h-16 bg-indigo-600 rounded-2xl flex items-center justify-center text-white mx-auto mb-6 shadow-xl">
                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
-            <h1 className="text-3xl font-black text-white tracking-tighter">Sync Engine Activation</h1>
-            <p className="text-slate-400 text-xs font-medium mt-3 leading-relaxed">
-              Connect to your free cloud once. Your friends join instantly—they never see this screen!
-            </p>
+            <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Initialize Sync</h1>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Engaging Multi-user Cloud Engine</p>
           </div>
           
           <div className="space-y-6">
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-4">Sync Endpoint URL</label>
-              <input id="db-url" className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl font-bold mt-2 outline-none focus:ring-4 focus:ring-indigo-500/20 text-white transition-all" placeholder="https://abc.supabase.co" />
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-4">Sync URL</label>
+              <input id="db-url" className="w-full p-4 bg-white/5 border border-white/10 rounded-xl font-bold mt-2 outline-none focus:ring-4 focus:ring-indigo-500/20 text-white transition-all placeholder:text-white/10" placeholder="https://xxx.supabase.co" />
             </div>
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-4">Sync Public Key</label>
-              <input id="db-key" className="w-full p-5 bg-white/5 border border-white/10 rounded-2xl font-bold mt-2 outline-none focus:ring-4 focus:ring-indigo-500/20 text-white transition-all" placeholder="eyJ..." />
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-4">Public API Key</label>
+              <input id="db-key" className="w-full p-4 bg-white/5 border border-white/10 rounded-xl font-bold mt-2 outline-none focus:ring-4 focus:ring-indigo-500/20 text-white transition-all placeholder:text-white/10" placeholder="anon_public_key..." />
             </div>
             <button 
               onClick={() => {
@@ -319,60 +363,62 @@ const ActivationScreen: React.FC<{ onActivate: (url: string, key: string) => voi
                 const k = (document.getElementById('db-key') as HTMLInputElement).value;
                 if (u && k) onActivate(u, k);
               }}
-              className="w-full py-6 bg-indigo-600 text-white rounded-[2rem] font-black text-lg shadow-xl hover:bg-indigo-700 transition-all active:scale-95"
+              className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-700 transition-all active:scale-95"
             >
-              Start Global Sync
+              Connect Engine
             </button>
-            <div className="text-center pt-2">
-              <button 
-                onClick={() => setShowGuide(!showGuide)}
-                className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] hover:text-indigo-300 transition-colors flex items-center justify-center gap-2 mx-auto"
-              >
-                {showGuide ? "Hide Guide" : "How do I get these?"}
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 transition-transform ${showGuide ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" /></svg>
+            <div className="text-center">
+              <button onClick={() => setShowGuide(!showGuide)} className="text-[9px] font-black text-indigo-400 uppercase tracking-widest hover:text-indigo-300 transition-colors flex items-center justify-center gap-2 mx-auto">
+                {showGuide ? "Hide Setup Instructions" : "Help me set this up"}
+                <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${showGuide ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" /></svg>
               </button>
             </div>
           </div>
         </div>
 
-        {/* Step-by-Step Instruction Guide (Visible when toggled) */}
+        {/* Step-by-Step Guide */}
         {showGuide && (
-          <div className="flex-1 bg-slate-900 border border-white/5 rounded-[3.5rem] p-10 md:p-14 shadow-2xl animate-in slide-in-from-right-8 fade-in">
+          <div className="flex-1 bg-slate-900 border border-white/5 rounded-[3.5rem] p-10 md:p-14 shadow-2xl animate-in slide-in-from-right-8 duration-500 overflow-hidden">
             <h2 className="text-xl font-black text-white mb-8 flex items-center gap-3">
-              <span className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-sm">💡</span>
-              One-Time Setup
+              <span className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-xs">🚀</span>
+              3-Step Cloud Launch
             </h2>
-            <div className="space-y-10">
-              <div className="flex gap-6">
-                <div className="shrink-0 w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 font-black flex items-center justify-center border border-indigo-500/20 text-xs">01</div>
-                <div>
-                  <h4 className="text-sm font-black text-white mb-1">Create Project</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Go to <a href="https://supabase.com/dashboard" target="_blank" className="text-indigo-400 underline font-black">Supabase Dashboard</a> and click <b>New Project</b>. It takes about 2 minutes to provision.
-                  </p>
+            
+            <div className="space-y-12">
+              <div className="relative pl-12">
+                <div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">1</div>
+                <h4 className="text-sm font-black text-white mb-1">Create Free Project</h4>
+                <p className="text-xs text-slate-500 leading-relaxed mb-3">Visit <a href="https://supabase.com/dashboard" target="_blank" className="text-indigo-400 underline font-black">Supabase Dashboard</a> and start a new project (it takes 1 minute).</p>
+              </div>
+
+              <div className="relative pl-12">
+                <div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">2</div>
+                <h4 className="text-sm font-black text-white mb-1">Engage Database</h4>
+                <p className="text-xs text-slate-500 leading-relaxed mb-4">Open the <b>SQL Editor</b> (left sidebar) and run this script to create your calendar infrastructure:</p>
+                <div className="relative group">
+                  <pre className="p-4 bg-black/40 rounded-2xl border border-white/5 text-[9px] font-mono text-slate-400 overflow-x-auto max-h-40 custom-scrollbar">
+                    {sqlSetup}
+                  </pre>
+                  <button 
+                    onClick={handleCopySql}
+                    className={`absolute top-3 right-3 px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all ${copied ? 'bg-emerald-500 text-white' : 'bg-white/10 text-white hover:bg-indigo-600'}`}
+                  >
+                    {copied ? "Copied!" : "Copy SQL"}
+                  </button>
                 </div>
               </div>
-              <div className="flex gap-6">
-                <div className="shrink-0 w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 font-black flex items-center justify-center border border-indigo-500/20 text-xs">02</div>
-                <div>
-                  <h4 className="text-sm font-black text-white mb-1">Find API Settings</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed">
-                    Once ready, go to <b>Project Settings</b> (cog icon) &rarr; <b>API</b> in the sidebar.
-                  </p>
-                </div>
+
+              <div className="relative pl-12">
+                <div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">3</div>
+                <h4 className="text-sm font-black text-white mb-1">Engage Keys</h4>
+                <p className="text-xs text-slate-500 leading-relaxed">Go to <b>Settings &rarr; API</b> to find your <b>URL</b> and <b>anon public key</b>. Paste them on the left.</p>
               </div>
-              <div className="flex gap-6">
-                <div className="shrink-0 w-10 h-10 rounded-full bg-indigo-500/20 text-indigo-400 font-black flex items-center justify-center border border-indigo-500/20 text-xs">03</div>
-                <div>
-                  <h4 className="text-sm font-black text-white mb-1">Copy & Paste</h4>
-                  <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                    Copy the <b>Project URL</b> and the <b>anon public</b> API Key into the boxes on the left.
-                  </p>
-                  <div className="p-4 bg-black/40 rounded-2xl border border-white/5 text-[9px] font-mono text-slate-400 italic">
-                    Note: This turns your browser into a host server. No personal data is stored by SyncCircle.
-                  </div>
-                </div>
-              </div>
+            </div>
+
+            <div className="mt-12 p-6 bg-indigo-600/10 rounded-2xl border border-indigo-500/10">
+               <p className="text-[10px] font-bold text-indigo-300 leading-relaxed">
+                 <span className="font-black uppercase tracking-widest">Pro Tip:</span> If you host this on Vercel, add these as environment variables (<code>SUPABASE_URL</code> and <code>SUPABASE_KEY</code>) to skip this setup for everyone!
+               </p>
             </div>
           </div>
         )}
@@ -394,7 +440,7 @@ const ProfileScreen: React.FC<{ isJoining: boolean; circleName: string; onComple
              {isJoining ? "Invite Accepted" : "SyncCircle"}
            </h1>
            <p className="text-slate-500 text-sm font-medium mt-2 leading-relaxed">
-             {isJoining ? `Entering ${circleName}...` : "Just a quick name to start syncing."}
+             {isJoining ? `Entering ${circleName}...` : "Welcome! Start by picking a name."}
            </p>
         </div>
         <div className="flex flex-col items-center">
@@ -425,7 +471,7 @@ const ProfileScreen: React.FC<{ isJoining: boolean; circleName: string; onComple
             onClick={() => onComplete(name, avatar)}
             className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-xl hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50"
           >
-            Join Live Room
+            Enter Room
           </button>
         </div>
       </div>
@@ -441,8 +487,8 @@ const ChoiceScreen: React.FC<{ user: User; onCreate: (n: string) => void; onJoin
           <div className="w-24 h-24 rounded-full overflow-hidden border-4 border-white/10 shadow-2xl mx-auto mb-6">
              {user.avatar ? <img src={user.avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full bg-indigo-600 flex items-center justify-center text-white font-black text-3xl">{user.name.charAt(0)}</div>}
           </div>
-          <h1 className="text-5xl font-black text-white tracking-tighter">Hi, {user.name.split(' ')[0]}!</h1>
-          <p className="text-slate-500 text-lg font-medium">Ready to coordinate with your group.</p>
+          <h1 className="text-5xl font-black text-white tracking-tighter leading-tight">Hi, {user.name.split(' ')[0]}!</h1>
+          <p className="text-slate-500 text-lg font-medium">Coordinate your group schedule in real-time.</p>
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
@@ -464,8 +510,8 @@ const ChoiceScreen: React.FC<{ user: User; onCreate: (n: string) => void; onJoin
             <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center mb-8 group-hover:bg-indigo-600 transition-colors">
                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
             </div>
-            <h3 className="text-2xl font-black text-white mb-2">Enter Code</h3>
-            <p className="text-sm text-slate-500 font-medium leading-relaxed">Have a Room ID from a friend? Paste it here to join.</p>
+            <h3 className="text-2xl font-black text-white mb-2">Join Code</h3>
+            <p className="text-sm text-slate-500 font-medium leading-relaxed">Paste a Room ID shared by a friend to join their calendar.</p>
           </button>
         </div>
 
