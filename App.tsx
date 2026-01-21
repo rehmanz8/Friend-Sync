@@ -200,7 +200,7 @@ const App: React.FC = () => {
               </button>
             </h2>
             <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-               Share: <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Copied Link!'); }} className="text-indigo-500 hover:underline">Copy Link</button>
+               Share: <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Copied!'); }} className="text-indigo-500 hover:underline">Copy Link</button>
             </div>
           </div>
           
@@ -243,7 +243,6 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center p-8 animate-in zoom-in-95">
           <div className="bg-white rounded-[4rem] p-16 max-w-xl w-full text-center shadow-2xl">
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter mb-4">Cloud Sync</h2>
-            <p className="text-slate-400 text-sm mb-12 font-medium">Connect to Supabase for real-time collaboration.</p>
             <div className="space-y-6 text-left">
               <div>
                 <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Supabase URL</label>
@@ -259,7 +258,7 @@ const App: React.FC = () => {
                 localStorage.setItem('synccircle_cloud_url', u);
                 localStorage.setItem('synccircle_cloud_key', k);
                 window.location.reload();
-              }} className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl hover:bg-indigo-700 transition-all">Save & Connect</button>
+              }} className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl">Connect</button>
               <button onClick={() => setShowCloudWizard(false)} className="w-full py-4 text-slate-400 font-black text-sm uppercase">Cancel</button>
             </div>
           </div>
@@ -280,7 +279,7 @@ const LandingPage: React.FC<{ isJoining: boolean; onComplete: (un: string, cn: s
       <div className="absolute top-[-20%] left-[-10%] w-[60%] h-[60%] bg-indigo-600/20 blur-[200px] rounded-full" />
       <div className="max-w-xl w-full bg-white rounded-[4rem] p-16 shadow-2xl z-10 animate-in zoom-in-95 text-center">
         <h1 className="text-4xl font-black text-slate-900 tracking-tighter mb-2">{isJoining ? 'Join the Circle' : 'SyncCircle'}</h1>
-        <p className="text-slate-400 font-medium mb-12 text-base">Real-time collaborative scheduling for friends.</p>
+        <p className="text-slate-400 font-medium mb-12 text-base">Collaborative scheduling for friends.</p>
         <div className="space-y-8 text-left">
           <div className="flex flex-col items-center">
              <div onClick={() => fileRef.current?.click()} className="w-24 h-24 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden cursor-pointer group relative">
@@ -298,12 +297,12 @@ const LandingPage: React.FC<{ isJoining: boolean; onComplete: (un: string, cn: s
           </div>
           <div className="space-y-6">
             <div><label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Your Name</label><input className="w-full p-6 bg-slate-50 border-none rounded-2xl font-bold mt-2" placeholder="E.g. Alex" value={uName} onChange={(e) => setUName(e.target.value)} /></div>
-            {!isJoining && (<div><label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Circle Name</label><input className="w-full p-6 bg-slate-50 border-none rounded-2xl font-bold mt-2" placeholder="E.g. Group Name" value={cName} onChange={(e) => setCName(e.target.value)} /></div>)}
+            {!isJoining && (<div><label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Circle Name</label><input className="w-full p-6 bg-slate-50 border-none rounded-2xl font-bold mt-2" placeholder="E.g. Group" value={cName} onChange={(e) => setCName(e.target.value)} /></div>)}
           </div>
           <button 
             disabled={!uName || (!isJoining && !cName)} 
             onClick={() => onComplete(uName, cName, avatar)} 
-            className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl disabled:opacity-50 flex items-center justify-center gap-3 transition-all active:scale-95"
+            className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl disabled:opacity-50 flex items-center justify-center gap-3"
           >
             {isSyncing && <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             {isJoining ? 'Join' : 'Start'} Circle

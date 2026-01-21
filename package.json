@@ -6,13 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {
     "@google/genai": "^1.37.0",
     "@supabase/supabase-js": "^2.39.0",
-    "lucide-react": "^0.454.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
