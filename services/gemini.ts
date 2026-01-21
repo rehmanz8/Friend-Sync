@@ -4,6 +4,12 @@ import { ScheduleEvent, User, DayOfWeek } from "../types";
 import { DAYS, formatTime } from "../constants";
 
 export const getSmartSuggestions = async (users: User[], events: ScheduleEvent[]) => {
+  if (!process.env.API_KEY) {
+    console.warn("Gemini API Key missing. AI suggestions disabled.");
+    return [];
+  }
+
+  // Strictly following the Google GenAI SDK rules
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const activeUsers = users.filter(u => u.active);
@@ -56,12 +62,17 @@ export const getSmartSuggestions = async (users: User[], events: ScheduleEvent[]
     const jsonStr = response.text?.trim() || '{"suggestions": []}';
     return JSON.parse(jsonStr).suggestions;
   } catch (error) {
-    console.error("AI Error:", error);
+    console.error("AI Insight Error:", error);
     return [];
   }
 };
 
 export const parseScheduleImage = async (base64Image: string, mimeType: string) => {
+  if (!process.env.API_KEY) {
+    alert("AI features are not configured. Please add an API_KEY to environment variables.");
+    return [];
+  }
+
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   
   const prompt = `
@@ -114,7 +125,7 @@ export const parseScheduleImage = async (base64Image: string, mimeType: string) 
     const jsonStr = response.text?.trim() || '{"events": []}';
     return JSON.parse(jsonStr).events;
   } catch (error) {
-    console.error("AI OCR Error:", error);
+    console.error("AI Scan Error:", error);
     return [];
   }
 };

@@ -7,6 +7,13 @@
     <title>SyncCircle Cloud</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <script>
+      /**
+       * SHIM: Prevent "process is not defined" errors in the browser.
+       * This is the most common cause of white screens when using Node-style libraries.
+       */
+      window.process = window.process || { env: {} };
+    </script>
     <style>
         body { font-family: 'Inter', sans-serif; }
         .custom-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -59,8 +66,11 @@
     const crash = document.getElementById('crash-screen');
     const msgEl = document.getElementById('crash-message');
     if (crash && msgEl) {
+      // Ignore trivial warnings or hydration mismatches
+      if (msg.includes('ResizeObserver') || msg.includes('Script error')) return false;
+      
       crash.style.display = 'flex';
-      msgEl.innerText = msg + '\nAt: ' + line + ':' + col;
+      msgEl.innerText = msg + '\nAt: ' + url + ':' + line + ':' + col;
     }
     return false;
   };
@@ -70,9 +80,9 @@
     <div id="root"></div>
     <div id="crash-screen">
       <h1 style="color: #ef4444; font-weight: 900; margin-bottom: 1rem;">FATAL STARTUP ERROR</h1>
-      <p style="margin-bottom: 2rem; opacity: 0.7;">The app crashed before it could load. Please check your Supabase credentials.</p>
-      <pre id="crash-message" style="background: #1e293b; padding: 1.5rem; border-radius: 1rem; border: 1px solid #334155; width: 100%; max-width: 600px; overflow-x: auto;"></pre>
-      <button onclick="window.location.reload()" style="margin-top: 2rem; padding: 1rem 2rem; background: white; color: black; border-radius: 0.5rem; font-weight: bold; cursor: pointer;">Retry Application</button>
+      <p style="margin-bottom: 2rem; opacity: 0.7; max-width: 500px; text-align: center;">The application encountered a runtime error. This is often caused by missing environment variables or a configuration issue.</p>
+      <pre id="crash-message" style="background: #1e293b; padding: 1.5rem; border-radius: 1rem; border: 1px solid #334155; width: 100%; max-width: 600px; overflow-x: auto; color: #94a3b8; font-size: 12px;"></pre>
+      <button onclick="window.location.reload()" style="margin-top: 2rem; padding: 1rem 2rem; background: white; color: black; border-radius: 1rem; font-weight: 900; cursor: pointer; text-transform: uppercase; letter-spacing: 0.1em; font-size: 12px;">Retry Application</button>
     </div>
 </body>
 </html>
