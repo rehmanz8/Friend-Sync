@@ -1,8 +1,47 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { GoogleGenAI, Modality } from '@google/genai';
-import { User, ScheduleEvent } from '../types';
-import { DAYS, formatTime } from '../constants';
+import { GoogleGenAI, Modality, Blob, LiveServerMessage } from '@google/genai';
+import { User, ScheduleEvent } from '../types.ts';
+import { DAYS, formatTime } from '../constants.tsx';
+
+// Helper functions for Manual Base64 as per guidelines
+function encode(bytes: Uint8Array) {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function decode(base64: string) {
+  const binaryString = atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
+
+async function decodeAudioData(
+  data: Uint8Array,
+  ctx: AudioContext,
+  sampleRate: number,
+  numChannels: number,
+): Promise<AudioBuffer> {
+  const dataInt16 = new Int16Array(data.buffer);
+  const frameCount = dataInt16.length / numChannels;
+  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+
+  for (let channel = 0; channel < numChannels; channel++) {
+    const channelData = buffer.getChannelData(channel);
+    for (let i = 0; i < frameCount; i++) {
+      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
+    }
+  }
+  return buffer;
+}
 
 interface VoiceAssistantProps {
   users: User[];
@@ -44,6 +83,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ users, events, onClose 
 
   useEffect(() => {
     const initVoice = async () => {
+      // Ensure API key is present
       if (!process.env.API_KEY) {
         setError("API Key is missing.");
         setStatus('error');
@@ -51,6 +91,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ users, events, onClose 
       }
 
       try {
+        // Create a new GoogleGenAI instance using named parameter and process.env.API_KEY
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
         const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
@@ -69,40 +110,46 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ users, events, onClose 
               
               scriptProcessor.onaudioprocess = (e) => {
                 const inputData = e.inputBuffer.getChannelData(0);
-                const pcmData = new Int16Array(inputData.length);
-                for (let i = 0; i < inputData.length; i++) {
-                  pcmData[i] = inputData[i] * 32768;
+                const l = inputData.length;
+                const int16 = new Int16Array(l);
+                for (let i = 0; i < l; i++) {
+                  int16[i] = inputData[i] * 32768;
                 }
                 
-                const base64 = btoa(String.fromCharCode(...new Uint8Array(pcmData.buffer)));
+                const pcmBlob: Blob = {
+                  data: encode(new Uint8Array(int16.buffer)),
+                  mimeType: 'audio/pcm;rate=16000',
+                };
+
+                // Trigger sendRealtimeInput only after sessionPromise resolves
                 sessionPromise.then(s => {
-                  s.sendRealtimeInput({ media: { data: base64, mimeType: 'audio/pcm;rate=16000' } });
+                  s.sendRealtimeInput({ media: pcmBlob });
                 });
               };
 
               source.connect(scriptProcessor);
               scriptProcessor.connect(inputCtx.destination);
             },
-            onmessage: async (message) => {
+            onmessage: async (message: LiveServerMessage) => {
               const base64Audio = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
               if (base64Audio) {
                 setStatus('speaking');
-                const binary = atob(base64Audio);
-                const bytes = new Uint8Array(binary.length);
-                for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
                 
-                const dataInt16 = new Int16Array(bytes.buffer);
-                const buffer = outputCtx.createBuffer(1, dataInt16.length, 24000);
-                const channelData = buffer.getChannelData(0);
-                for (let i = 0; i < dataInt16.length; i++) channelData[i] = dataInt16[i] / 32768.0;
+                const audioBuffer = await decodeAudioData(
+                  decode(base64Audio),
+                  outputCtx,
+                  24000,
+                  1
+                );
 
                 const source = outputCtx.createBufferSource();
-                source.buffer = buffer;
+                source.buffer = audioBuffer;
                 source.connect(outputCtx.destination);
                 
+                // Gapless playback tracking using nextStartTime
                 nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outputCtx.currentTime);
                 source.start(nextStartTimeRef.current);
-                nextStartTimeRef.current += buffer.duration;
+                nextStartTimeRef.current += audioBuffer.duration;
                 
                 sourcesRef.current.add(source);
                 source.onended = () => {

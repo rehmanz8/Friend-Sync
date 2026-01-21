@@ -1,12 +1,11 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, ScheduleEvent, AppView } from './types';
-import { COLORS } from './constants';
-import Sidebar from './components/Sidebar';
-import CalendarGrid from './components/CalendarGrid';
-import TimetableEntry from './components/TimetableEntry';
-import VoiceAssistant from './components/VoiceAssistant';
-import { getSmartSuggestions } from './services/gemini';
+import { User, ScheduleEvent, AppView } from './types.ts';
+import { COLORS } from './constants.tsx';
+import Sidebar from './components/Sidebar.tsx';
+import CalendarGrid from './components/CalendarGrid.tsx';
+import TimetableEntry from './components/TimetableEntry.tsx';
+import { getSmartSuggestions } from './services/gemini.ts';
 import { 
   fetchCircleData, 
   syncEventToCloud, 
@@ -15,9 +14,18 @@ import {
   ensureCircleInCloud,
   deleteEventFromCloud,
   getSupabaseClient
-} from './services/supabase';
+} from './services/supabase.ts';
 
-const generateId = () => crypto.randomUUID();
+const generateId = () => {
+  try {
+    return crypto.randomUUID();
+  } catch (e) {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+};
 
 const App: React.FC = () => {
   const [sessionId, setSessionId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('group'));
@@ -26,7 +34,6 @@ const App: React.FC = () => {
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [view, setView] = useState<AppView>('calendar');
   const [showCloudWizard, setShowCloudWizard] = useState(false);
-  const [isVoiceActive, setIsVoiceActive] = useState(false);
   
   const [currentUser, setCurrentUser] = useState<string | null>(() => {
     if (!sessionId) return localStorage.getItem('synccircle_current_user_local');
@@ -185,11 +192,10 @@ const App: React.FC = () => {
               {groupName}
               <button 
                 onClick={() => setShowCloudWizard(true)}
-                className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all hover:scale-105 ${isCloudEnabled ? 'bg-indigo-50 border-indigo-100' : 'bg-rose-50 border-rose-100'}`}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-full border transition-all hover:scale-105 ${isCloudEnabled ? 'bg-indigo-50 border-indigo-100' : 'bg-slate-50 border-slate-100'}`}
               >
-                <div className={`w-1.5 h-1.5 rounded-full ${isCloudSyncing ? 'bg-amber-500' : isCloudEnabled ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse pulse-ring`} />
-                <span className={`text-[8px] font-black uppercase tracking-widest ${isCloudEnabled ? 'text-indigo-600' : 'text-rose-600'}`}>
-                  {isCloudSyncing ? 'Syncing' : isCloudEnabled ? 'Live Sync' : 'Go Live'}
+                <span className={`text-[8px] font-black uppercase tracking-widest ${isCloudEnabled ? 'text-indigo-600' : 'text-slate-400'}`}>
+                  {isCloudSyncing ? 'Syncing...' : isCloudEnabled ? 'Live' : 'Go Live'}
                 </span>
               </button>
             </h2>
@@ -199,13 +205,6 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => setIsVoiceActive(true)}
-              className="px-5 py-2.5 bg-rose-500 text-white rounded-2xl font-black text-sm shadow-xl shadow-rose-200 hover:bg-rose-600 transition-all flex items-center gap-2"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z" /><path d="M7 10V5a3 3 0 016 0v5h2V5a5 5 0 00-10 0v5h2z" /><path d="M5 11a5 5 0 0010 0v-2h-2v2a3 3 0 01-6 0v-2H5v2z" /><path d="M11 14v2h1v2H8v-2h1v-2a5.002 5.002 0 002-4.899V14z" /></svg>
-              Talk to Circle
-            </button>
             <button 
               onClick={async () => { setLoadingSuggestions(true); const s = await getSmartSuggestions(users, events); setSuggestions(s); setLoadingSuggestions(false); }} 
               disabled={loadingSuggestions}
@@ -243,7 +242,7 @@ const App: React.FC = () => {
       {showCloudWizard && (
         <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center p-8 animate-in zoom-in-95">
           <div className="bg-white rounded-[4rem] p-16 max-w-xl w-full text-center shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)]">
-            <h2 className="text-3xl font-black text-slate-900 tracking-tighter mb-4">Go Live</h2>
+            <h2 className="text-3xl font-black text-slate-900 tracking-tighter mb-4">Cloud Sync</h2>
             <p className="text-slate-400 text-sm mb-12 font-medium">To sync with friends in real-time, enter your Supabase credentials. These are saved to your browser locally.</p>
             <div className="space-y-6 text-left">
               <div>
@@ -266,8 +265,6 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
-      {isVoiceActive && <VoiceAssistant users={users} events={events} onClose={() => setIsVoiceActive(false)} />}
     </div>
   );
 };
