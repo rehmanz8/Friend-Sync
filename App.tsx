@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { User, ScheduleEvent, AppView } from './types.ts';
-import { COLORS } from './constants.tsx';
-import Sidebar from './components/Sidebar.tsx';
-import CalendarGrid from './components/CalendarGrid.tsx';
-import TimetableEntry from './components/TimetableEntry.tsx';
-import { getSmartSuggestions } from './services/gemini.ts';
+import { User, ScheduleEvent, AppView } from './types';
+import { COLORS } from './constants';
+import Sidebar from './components/Sidebar';
+import CalendarGrid from './components/CalendarGrid';
+import TimetableEntry from './components/TimetableEntry';
+import { getSmartSuggestions } from './services/gemini';
 import { 
   fetchCircleData, 
   syncEventToCloud, 
@@ -14,7 +14,7 @@ import {
   ensureCircleInCloud,
   deleteEventFromCloud,
   getSupabaseClient
-} from './services/supabase.ts';
+} from './services/supabase';
 
 const generateId = () => {
   try {
@@ -200,7 +200,7 @@ const App: React.FC = () => {
               </button>
             </h2>
             <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-400 font-bold uppercase tracking-widest">
-               Share this URL: <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Copied!'); }} className="text-indigo-500">Copy Link</button>
+               Share: <button onClick={() => { navigator.clipboard.writeText(window.location.href); alert('Copied Link!'); }} className="text-indigo-500 hover:underline">Copy Link</button>
             </div>
           </div>
           
@@ -241,9 +241,9 @@ const App: React.FC = () => {
 
       {showCloudWizard && (
         <div className="fixed inset-0 z-[200] bg-slate-900/80 backdrop-blur-2xl flex items-center justify-center p-8 animate-in zoom-in-95">
-          <div className="bg-white rounded-[4rem] p-16 max-w-xl w-full text-center shadow-[0_50px_100px_-20px_rgba(0,0,0,0.5)]">
+          <div className="bg-white rounded-[4rem] p-16 max-w-xl w-full text-center shadow-2xl">
             <h2 className="text-3xl font-black text-slate-900 tracking-tighter mb-4">Cloud Sync</h2>
-            <p className="text-slate-400 text-sm mb-12 font-medium">To sync with friends in real-time, enter your Supabase credentials. These are saved to your browser locally.</p>
+            <p className="text-slate-400 text-sm mb-12 font-medium">Connect to Supabase for real-time collaboration.</p>
             <div className="space-y-6 text-left">
               <div>
                 <label className="text-[10px] font-black text-slate-300 uppercase tracking-widest ml-4">Supabase URL</label>
@@ -284,7 +284,7 @@ const LandingPage: React.FC<{ isJoining: boolean; onComplete: (un: string, cn: s
         <div className="space-y-8 text-left">
           <div className="flex flex-col items-center">
              <div onClick={() => fileRef.current?.click()} className="w-24 h-24 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden cursor-pointer group relative">
-               {avatar ? <img src={avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-200">📸</div>}
+               {avatar ? <img src={avatar} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-slate-200 text-2xl">📸</div>}
                <div className="absolute inset-0 bg-indigo-600/60 opacity-0 group-hover:opacity-100 flex items-center justify-center"><span className="text-[10px] font-black text-white uppercase tracking-widest">Photo</span></div>
              </div>
              <input type="file" ref={fileRef} className="hidden" accept="image/*" onChange={(e) => {
@@ -303,7 +303,7 @@ const LandingPage: React.FC<{ isJoining: boolean; onComplete: (un: string, cn: s
           <button 
             disabled={!uName || (!isJoining && !cName)} 
             onClick={() => onComplete(uName, cName, avatar)} 
-            className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl disabled:opacity-50 flex items-center justify-center gap-3"
+            className="w-full py-6 bg-indigo-600 text-white rounded-2xl font-black text-xl shadow-2xl disabled:opacity-50 flex items-center justify-center gap-3 transition-all active:scale-95"
           >
             {isSyncing && <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
             {isJoining ? 'Join' : 'Start'} Circle

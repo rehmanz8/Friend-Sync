@@ -1,7 +1,7 @@
 
 import React from 'react';
-import { DAYS, TIME_SLOTS, formatTime } from '../constants.tsx';
-import { ScheduleEvent, User } from '../types.ts';
+import { DAYS, TIME_SLOTS, formatTime } from '../constants';
+import { ScheduleEvent, User } from '../types';
 
 interface CalendarGridProps {
   users: User[];
@@ -11,7 +11,6 @@ interface CalendarGridProps {
   currentDate: Date;
 }
 
-// Full CalendarGrid component implementation to resolve the "no default export" error.
 const CalendarGrid: React.FC<CalendarGridProps> = ({ 
   users, 
   events, 
@@ -24,7 +23,6 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({
 
   return (
     <div className="flex-1 bg-white rounded-[3rem] shadow-[0_20px_70px_-10px_rgba(0,0,0,0.05)] border border-slate-100 overflow-hidden flex flex-col">
-      {/* Header with Days */}
       <div className="grid grid-cols-[100px_repeat(7,1fr)] border-b border-slate-50 bg-slate-50/10">
         <div className="p-6 border-r border-slate-50 flex items-center justify-center">
            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-slate-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -38,10 +36,8 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({
         ))}
       </div>
 
-      {/* Grid Content */}
       <div className="flex-1 overflow-y-auto relative custom-scrollbar">
         <div className="grid grid-cols-[100px_repeat(7,1fr)] relative min-h-full">
-          {/* Time Sidebar */}
           <div className="border-r border-slate-50 bg-white sticky left-0 z-10">
             {TIME_SLOTS.map(hour => (
               <div key={hour} className="h-24 p-4 text-right border-b border-slate-50/50">
@@ -52,20 +48,16 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({
             ))}
           </div>
 
-          {/* Grid Columns */}
           {DAYS.map((_, dayIndex) => (
             <div key={dayIndex} className="relative border-r border-slate-50 last:border-r-0 h-full">
-              {/* Hour slots background */}
               {TIME_SLOTS.map(hour => (
                 <div key={hour} className="h-24 border-b border-slate-50/50" />
               ))}
 
-              {/* Events overlay */}
               {filteredEvents
                 .filter(e => e.day === dayIndex)
                 .map(event => {
                   const user = users.find(u => u.id === event.userId);
-                  // 96px is h-24 height
                   const top = (event.startTime / 60) * 96;
                   const height = (event.duration / 60) * 96;
 
@@ -107,7 +99,6 @@ const CalendarGrid: React.FC<CalendarGridProps> = ({
                         </p>
                       </div>
                       
-                      {/* Avatar / Initials */}
                       <div className="absolute bottom-2 right-2 flex items-center gap-2">
                         {user?.avatar ? (
                           <img src={user.avatar} className="w-4 h-4 rounded-full border border-white" />
