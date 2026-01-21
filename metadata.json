@@ -1,5 +1,7 @@
 {
   "name": "SyncCircle - Shared Friend Schedules",
   "description": "A collaborative scheduling tool for friends to coordinate free time.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

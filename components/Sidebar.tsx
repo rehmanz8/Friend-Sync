@@ -14,12 +14,10 @@ interface SidebarProps {
   currentUser: string | null;
   onNewCircle: () => void;
   onJoinByCode: () => void;
-  isCloud: boolean;
-  onConnectCloud: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
-  users, onToggleUser, onToggleAll, onSelectCurrentUser, onOpenProfile, currentUser, onNewCircle, onJoinByCode, isCloud, onConnectCloud
+  users, onToggleUser, onToggleAll, onSelectCurrentUser, onOpenProfile, currentUser, onNewCircle, onJoinByCode
 }) => {
   const currentUserObj = users.find(u => u.id === currentUser);
 
@@ -64,7 +62,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm font-black truncate ${currentUser === user.id ? 'text-slate-900' : 'text-slate-600'}`}>{user.name}</p>
-                  <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-0.5">{user.active ? 'Syncing' : 'Filtered'}</p>
+                  <p className="text-[9px] font-black text-slate-300 uppercase tracking-widest mt-0.5">{user.active ? 'Active' : 'Hidden'}</p>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); onToggleUser(user.id); }} className={`p-2 rounded-xl transition-all ${user.active ? 'text-indigo-600 bg-indigo-50' : 'text-slate-300 bg-slate-50'}`}>
                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 12a2 2 0 100-4 2 2 0 000 4z" /><path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" /></svg>
@@ -78,28 +76,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                 onClick={onJoinByCode}
                 className="w-full py-4 rounded-2xl border-2 border-dashed border-indigo-100 text-[10px] font-black text-indigo-400 uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-200 transition-all flex items-center justify-center gap-2"
              >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
-                Join by Code
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" /></svg>
+                Join with ID
              </button>
              <button 
                 onClick={onNewCircle}
                 className="w-full py-4 rounded-2xl bg-slate-50 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:bg-slate-100 hover:text-slate-600 transition-all flex items-center justify-center gap-2"
              >
-                Switch Circle
+                Other Circle
              </button>
           </div>
         </div>
       </div>
 
       <div className="pt-8 border-t border-slate-100 space-y-4">
-        {!isCloud && (
-          <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-100 animate-in slide-in-from-bottom-2">
-             <p className="text-[10px] font-black text-indigo-600 uppercase tracking-widest mb-2">Private Local Mode</p>
-             <p className="text-[9px] font-medium text-indigo-400 leading-relaxed mb-3">Connecting a database allows you to invite friends via code.</p>
-             <button onClick={onConnectCloud} className="text-[10px] font-black text-white bg-indigo-600 px-3 py-1.5 rounded-lg w-full">Go Live</button>
-          </div>
-        )}
-
         <button 
           onClick={onOpenProfile}
           className={`group w-full p-4 rounded-[2rem] transition-all duration-300 border ${currentUser ? 'bg-slate-50 border-slate-200 hover:border-slate-300' : 'bg-slate-50 border-transparent text-slate-300'}`}
@@ -111,7 +101,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-xs font-black truncate leading-none mb-1">{currentUserObj?.name}</p>
-                <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest">Update Schedule</p>
+                <p className="text-[8px] font-black text-indigo-600 uppercase tracking-widest">Update Timeline</p>
               </div>
             </div>
           ) : (
