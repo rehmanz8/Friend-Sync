@@ -1,73 +1,75 @@
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ScheduleEvent, User } from '../types';
 
-/**
- * Gets credentials from either process.env or localStorage
- */
-const getCredentials = () => {
-  const envUrl = process.env.SUPABASE_URL;
-  const envKey = process.env.SUPABASE_ANON_KEY;
-  
-  const localUrl = localStorage.getItem('synccircle_cloud_url');
-  const localKey = localStorage.getItem('synccircle_cloud_key');
+let cachedClient: SupabaseClient | null = null;
 
-  return {
-    url: envUrl || localUrl || '',
-    key: envKey || localKey || ''
-  };
+const getCredentials = () => {
+  const params = new URLSearchParams(window.location.search);
+  
+  const urlFromUrl = params.get('s_url');
+  const keyFromUrl = params.get('s_key');
+  
+  if (urlFromUrl && keyFromUrl) {
+    localStorage.setItem('synccircle_cloud_url', urlFromUrl);
+    localStorage.setItem('synccircle_cloud_key', keyFromUrl);
+  }
+
+  const url = process.env.SUPABASE_URL || localStorage.getItem('synccircle_cloud_url') || '';
+  const key = process.env.SUPABASE_ANON_KEY || localStorage.getItem('synccircle_cloud_key') || '';
+
+  return { url, key };
 };
 
 export const getSupabaseClient = () => {
+  if (cachedClient) return cachedClient;
+  
+  const { url, key } = getCredentials();
+  if (!url || !key) return null;
+
   try {
-    const { url, key } = getCredentials();
-    if (!url || !key) return null;
-    return createClient(url, key);
+    cachedClient = createClient(url, key);
+    return cachedClient;
   } catch (err) {
     return null;
   }
 };
 
-export const supabase = getSupabaseClient();
+export const generateSuperLink = (circleId: string) => {
+  const baseUrl = window.location.origin + window.location.pathname;
+  return `${baseUrl}?group=${circleId}`;
+};
 
 export const ensureCircleInCloud = async (id: string, name: string) => {
   const client = getSupabaseClient();
-  if (!client) throw new Error("Cloud not configured.");
-  const { error } = await client
-    .from('circles')
-    .upsert({ id, name }, { onConflict: 'id' });
-  if (error) throw error;
+  if (!client) return;
+  await client.from('circles').upsert({ id, name }, { onConflict: 'id' });
 };
 
 export const ensureUserInCloud = async (user: User, circleId: string) => {
   const client = getSupabaseClient();
-  if (!client) throw new Error("Cloud not configured.");
-  const { data, error } = await client
-    .from('circle_users')
-    .upsert({
-      id: user.id,
-      circle_id: circleId,
-      name: user.name,
-      color: user.color,
-      avatar_url: user.avatar,
-      timezone: user.timezone
-    }, { onConflict: 'id' })
-    .select();
-  if (error) throw error;
-  return data?.[0];
+  if (!client) return;
+  await client.from('circle_users').upsert({
+    id: user.id,
+    circle_id: circleId,
+    name: user.name,
+    color: user.color,
+    avatar_url: user.avatar,
+    timezone: user.timezone
+  }, { onConflict: 'id' });
 };
 
 export const fetchCircleData = async (circleId: string) => {
   const client = getSupabaseClient();
-  if (!client) return { users: [], events: [], circleName: 'SyncCircle' };
+  if (!client) return { users: [], events: [], circleName: 'Local Calendar' };
+  
   try {
     const [uRes, eRes, cRes] = await Promise.all([
       client.from('circle_users').select('*').eq('circle_id', circleId),
       client.from('events').select('*').eq('circle_id', circleId),
-      client.from('circles').select('name').eq('id', circleId).single()
+      client.from('circles').select('name').eq('id', circleId).maybeSingle()
     ]);
-    if (uRes.error) throw uRes.error;
-    if (eRes.error) throw eRes.error;
+    
     const users: User[] = (uRes.data || []).map(u => ({
       id: u.id,
       name: u.name,
@@ -76,6 +78,7 @@ export const fetchCircleData = async (circleId: string) => {
       timezone: u.timezone,
       active: true
     }));
+    
     const events: ScheduleEvent[] = (eRes.data || []).map(e => ({
       id: e.id,
       userId: e.user_id,
@@ -86,6 +89,7 @@ export const fetchCircleData = async (circleId: string) => {
       startDate: e.start_date,
       endDate: e.end_date
     }));
+    
     return { users, events, circleName: cRes.data?.name || 'SyncCircle' };
   } catch (err) {
     return { users: [], events: [], circleName: 'SyncCircle' };
@@ -94,37 +98,33 @@ export const fetchCircleData = async (circleId: string) => {
 
 export const syncEventToCloud = async (event: Omit<ScheduleEvent, 'id'>, circleId: string) => {
   const client = getSupabaseClient();
-  if (!client) throw new Error("Cloud not configured.");
-  const { data, error } = await client
-    .from('events')
-    .insert([{
-      user_id: event.userId,
-      circle_id: circleId,
-      title: event.title,
-      day: event.day,
-      start_time: event.startTime,
-      duration: event.duration,
-      start_date: event.startDate,
-      end_date: event.endDate
-    }])
-    .select();
-  if (error) throw error;
-  return data?.[0];
+  if (!client) return;
+  await client.from('events').insert([{
+    user_id: event.userId,
+    circle_id: circleId,
+    title: event.title,
+    day: event.day,
+    start_time: event.startTime,
+    duration: event.duration,
+    start_date: event.startDate,
+    end_date: event.endDate
+  }]);
 };
 
 export const deleteEventFromCloud = async (eventId: string) => {
   const client = getSupabaseClient();
   if (!client) return;
-  const { error } = await client.from('events').delete().eq('id', eventId);
-  if (error) throw error;
+  await client.from('events').delete().eq('id', eventId);
 };
 
 export const subscribeToCircle = (circleId: string, onUpdate: () => void) => {
   const client = getSupabaseClient();
   if (!client) return { unsubscribe: () => {} };
-  return client
-    .channel(`circle-${circleId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `circle_id=eq.${circleId}` }, onUpdate)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'circle_users', filter: `circle_id=eq.${circleId}` }, onUpdate)
+  
+  const channel = client.channel(`circle-${circleId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'events', filter: `circle_id=eq.${circleId}` }, () => onUpdate())
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'circle_users', filter: `circle_id=eq.${circleId}` }, () => onUpdate())
     .subscribe();
+
+  return channel;
 };
