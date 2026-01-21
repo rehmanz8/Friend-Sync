@@ -16,7 +16,9 @@ import {
   ensureCircleInCloud, 
   deleteEventFromCloud, 
   getSupabaseClient, 
-  generateSuperLink 
+  generateSuperLink,
+  resetSupabaseClient,
+  checkCircleExists
 } from './services/supabase';
 
 const generateId = () => {
@@ -38,20 +40,20 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : null;
   });
   
+  const [cloudActive, setCloudActive] = useState(() => !!getSupabaseClient());
   const [groupName, setGroupName] = useState<string>('SyncCircle');
   const [users, setUsers] = useState<User[]>([]);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [view, setView] = useState<AppView>('calendar');
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
   const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
-  const isSyncConfigured = !!getSupabaseClient();
-
   const loadData = useCallback(async (id: string | null) => {
-    if (!id || !isSyncConfigured) return;
+    if (!id || !cloudActive) return;
     setIsCloudSyncing(true);
     try {
       const { users: cloudUsers, events: cloudEvents, circleName } = await fetchCircleData(id);
@@ -68,17 +70,24 @@ const App: React.FC = () => {
     } finally {
       setIsCloudSyncing(false);
     }
-  }, [currentUser, isSyncConfigured]);
+  }, [currentUser, cloudActive]);
 
   useEffect(() => {
-    if (!sessionId || !isSyncConfigured) return;
+    if (!sessionId || !cloudActive) return;
     loadData(sessionId);
     const client = getSupabaseClient();
     if (client) {
       const subscription = subscribeToCircle(sessionId, () => loadData(sessionId));
       return () => { subscription.unsubscribe(); };
     }
-  }, [sessionId, loadData, isSyncConfigured]);
+  }, [sessionId, loadData, cloudActive]);
+
+  const handleCloudSetup = (url: string, key: string) => {
+    localStorage.setItem('synccircle_cloud_url', url);
+    localStorage.setItem('synccircle_cloud_key', key);
+    resetSupabaseClient();
+    setCloudActive(true);
+  };
 
   const handleProfileComplete = async (name: string, avatar?: string) => {
     const newUser: User = {
@@ -92,27 +101,36 @@ const App: React.FC = () => {
     localStorage.setItem('synccircle_profile', JSON.stringify(newUser));
     setCurrentUser(newUser);
 
-    if (sessionId && isSyncConfigured) {
-      await ensureUserInCloud(newUser, sessionId);
-      await loadData(sessionId);
-      setView('setup');
+    if (sessionId && cloudActive) {
+      try {
+        await ensureUserInCloud(newUser, sessionId);
+        await loadData(sessionId);
+        setView('setup');
+      } catch (err) {
+        console.error("Profile Sync Error:", err);
+      }
     }
   };
 
   const handleCreateCircle = async (name: string = 'Our Circle') => {
-    if (!currentUser || !isSyncConfigured) return;
+    if (!currentUser || !cloudActive) {
+      alert("Database not connected.");
+      return;
+    }
     const newSessionId = generateId();
     setIsCloudSyncing(true);
     try {
       await ensureCircleInCloud(newSessionId, name);
       await ensureUserInCloud(currentUser, newSessionId);
+      
+      const baseUrl = window.location.origin + window.location.pathname;
+      window.history.pushState({}, '', `${baseUrl}?group=${newSessionId}`);
+      
       setSessionId(newSessionId);
-      window.history.pushState({}, '', `?group=${newSessionId}`);
-      await loadData(newSessionId);
       setView('setup');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Create Circle Error:", err);
-      alert("Cloud failure. Make sure your database setup is correct.");
+      alert(err.message || "Failed to create Room. Check SQL Setup.");
     } finally {
       setIsCloudSyncing(false);
     }
@@ -120,25 +138,34 @@ const App: React.FC = () => {
 
   const handleJoinByCode = async (code: string) => {
     const cleanCode = code.trim();
-    if (!cleanCode || !currentUser || !isSyncConfigured) return;
+    if (!cleanCode || !currentUser || !cloudActive) return;
     setIsCloudSyncing(true);
     try {
+      const exists = await checkCircleExists(cleanCode);
+      if (!exists) {
+        throw new Error("Room ID not found. Make sure you entered the full ID correctly.");
+      }
+
       await ensureUserInCloud(currentUser, cleanCode);
+      
+      const baseUrl = window.location.origin + window.location.pathname;
+      window.history.pushState({}, '', `${baseUrl}?group=${cleanCode}`);
+      
       setSessionId(cleanCode);
       setShowJoinModal(false);
-      window.history.pushState({}, '', `?group=${cleanCode}`);
+      setJoinCode('');
       await loadData(cleanCode);
       setView('setup');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Join Circle Error:", err);
-      alert("Join failed. Check the ID and try again.");
+      alert(err.message || "Join failed.");
     } finally {
       setIsCloudSyncing(false);
     }
   };
 
   const handleUpsertEvent = async (event: Omit<ScheduleEvent, 'id'>) => {
-    if (!sessionId || !isSyncConfigured) return;
+    if (!sessionId || !cloudActive) return;
     setIsCloudSyncing(true);
     try {
       if (editingEvent) {
@@ -156,7 +183,7 @@ const App: React.FC = () => {
   };
 
   const handleAddBatch = async (newEvents: Omit<ScheduleEvent, 'id'>[]) => {
-    if (!sessionId || !isSyncConfigured) return;
+    if (!sessionId || !cloudActive) return;
     setIsCloudSyncing(true);
     try {
       await Promise.all(newEvents.map(e => syncEventToCloud(e, sessionId)));
@@ -170,7 +197,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteEvent = async (id: string) => {
-    if (!sessionId || !isSyncConfigured) return;
+    if (!sessionId || !cloudActive) return;
     setIsCloudSyncing(true);
     try {
       await deleteEventFromCloud(id);
@@ -183,18 +210,13 @@ const App: React.FC = () => {
   };
 
   const handleCopyInvite = async () => {
-    if (!sessionId) {
-       console.warn("No session ID to generate invite link for.");
-       return;
-    }
+    if (!sessionId) return;
     const magicLink = generateSuperLink(sessionId);
 
     try {
-      // First try modern clipboard API
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(magicLink);
       } else {
-        // Robust fallback for non-secure contexts (http) or older browsers
         const textArea = document.createElement("textarea");
         textArea.value = magicLink;
         textArea.style.position = "fixed";
@@ -212,12 +234,11 @@ const App: React.FC = () => {
       setTimeout(() => setIsCopied(false), 2000);
     } catch (err) {
       console.error('Failed to copy link: ', err);
-      // Last resort: standard prompt if all else fails
       window.prompt("Copy this link to invite your friends:", magicLink);
     }
   };
 
-  if (!isSyncConfigured) return <ActivationScreen onActivate={(url, key) => { localStorage.setItem('synccircle_cloud_url', url); localStorage.setItem('synccircle_cloud_key', key); window.location.reload(); }} />;
+  if (!cloudActive) return <ActivationScreen onActivate={handleCloudSetup} />;
   if (!currentUser) return <ProfileScreen isJoining={!!sessionId} circleName={groupName} onComplete={handleProfileComplete} />;
   if (!sessionId) return <ChoiceScreen user={currentUser} onCreate={handleCreateCircle} onJoin={() => setShowJoinModal(true)} />;
 
@@ -233,7 +254,7 @@ const App: React.FC = () => {
         onSelectCurrentUser={() => {}}
         onOpenProfile={() => setView('setup')}
         currentUser={currentUser.id}
-        onNewCircle={() => { setSessionId(null); window.history.pushState({}, '', window.location.pathname); }}
+        onNewCircle={() => { setSessionId(null); window.history.pushState({}, '', window.location.origin + window.location.pathname); }}
         onJoinByCode={() => setShowJoinModal(true)}
       />
       
@@ -306,10 +327,17 @@ const App: React.FC = () => {
           <div className="w-full max-w-md bg-slate-900 rounded-[3rem] p-12 border border-white/5 shadow-2xl text-center">
             <h2 className="text-2xl font-black text-white tracking-tighter mb-2">Join Room</h2>
             <p className="text-slate-500 text-sm font-medium mb-8">Enter a friend's Room ID.</p>
-            <input id="join-code-input" className="w-full p-6 bg-white/5 border border-white/10 rounded-2xl font-mono font-bold text-center mb-6 outline-none focus:ring-4 focus:ring-indigo-500/20 text-indigo-400" placeholder="xxxxxxxx..." autoFocus onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode((e.target as HTMLInputElement).value)} />
+            <input 
+              className="w-full p-6 bg-white/5 border border-white/10 rounded-2xl font-mono font-bold text-center mb-6 outline-none focus:ring-4 focus:ring-indigo-500/20 text-indigo-400" 
+              placeholder="xxxxxxxx..." 
+              autoFocus 
+              value={joinCode}
+              onChange={(e) => setJoinCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleJoinByCode(joinCode)} 
+            />
             <div className="flex gap-4">
-              <button onClick={() => setShowJoinModal(false)} className="flex-1 py-4 bg-white/5 text-slate-500 font-black rounded-xl">Cancel</button>
-              <button onClick={() => handleJoinByCode((document.getElementById('join-code-input') as HTMLInputElement).value)} className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-black shadow-lg">Join</button>
+              <button onClick={() => { setShowJoinModal(false); setJoinCode(''); }} className="flex-1 py-4 bg-white/5 text-slate-500 font-black rounded-xl">Cancel</button>
+              <button onClick={() => handleJoinByCode(joinCode)} className="flex-1 py-4 bg-indigo-600 text-white rounded-xl font-black shadow-lg transition-all active:scale-95">Join</button>
             </div>
           </div>
         </div>
@@ -323,41 +351,59 @@ const App: React.FC = () => {
 const ActivationScreen: React.FC<{ onActivate: (url: string, key: string) => void }> = ({ onActivate }) => {
   const [showGuide, setShowGuide] = useState(false);
   const [copied, setCopied] = useState(false);
+  
   const sqlSetup = `
--- 1. Create circles table
-create table circles (
-  id uuid primary key,
-  name text not null,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+-- 1. Setup UUID extension
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- 2. Create tables
+CREATE TABLE IF NOT EXISTS circles (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- 2. Create circle_users table
-create table circle_users (
-  id uuid primary key,
-  circle_id uuid references circles(id) on delete cascade,
-  name text not null,
-  color text,
-  avatar_url text,
-  timezone text,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+CREATE TABLE IF NOT EXISTS circle_users (
+  id UUID PRIMARY KEY,
+  circle_id UUID REFERENCES circles(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  color TEXT,
+  avatar_url TEXT,
+  timezone TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- 3. Create events table
-create table events (
-  id uuid primary key default gen_random_uuid(),
-  circle_id uuid references circles(id) on delete cascade,
-  user_id uuid,
-  title text not null,
-  day integer not null,
-  start_time integer not null,
-  duration integer not null,
-  start_date date,
-  end_date date,
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+CREATE TABLE IF NOT EXISTS events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  circle_id UUID REFERENCES circles(id) ON DELETE CASCADE,
+  user_id UUID,
+  title TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  start_time INTEGER NOT NULL,
+  duration INTEGER NOT NULL,
+  start_date DATE,
+  end_date DATE,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- 4. Enable Realtime for all tables
-alter publication supabase_realtime add table circles, circle_users, events;
+-- 3. ENABLE RLS (Row Level Security)
+ALTER TABLE circles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE circle_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE events ENABLE ROW LEVEL SECURITY;
+
+-- 4. CREATE POLICIES (Grant full access for anonymous key)
+DROP POLICY IF EXISTS "Public Access" ON circles;
+CREATE POLICY "Public Access" ON circles FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Access" ON circle_users;
+CREATE POLICY "Public Access" ON circle_users FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Public Access" ON events;
+CREATE POLICY "Public Access" ON events FOR ALL USING (true) WITH CHECK (true);
+
+-- 5. Enable Realtime
+ALTER PUBLICATION supabase_realtime DROP TABLE IF EXISTS circles, circle_users, events;
+ALTER PUBLICATION supabase_realtime ADD TABLE circles, circle_users, events;
   `.trim();
 
   return (
@@ -369,7 +415,7 @@ alter publication supabase_realtime add table circles, circle_users, events;
                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
             </div>
             <h1 className="text-3xl font-black text-white tracking-tighter uppercase">Initialize Sync</h1>
-            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Engaging Multi-user Cloud Engine</p>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-3">Reactive Multi-user Cloud Engine</p>
           </div>
           <div className="space-y-6">
             <div>
@@ -386,15 +432,18 @@ alter publication supabase_realtime add table circles, circle_users, events;
         </div>
         {showGuide && (
           <div className="flex-1 bg-slate-900 border border-white/5 rounded-[3.5rem] p-14 shadow-2xl animate-in slide-in-from-right-8 text-left overflow-hidden">
-            <h2 className="text-xl font-black text-white mb-8">3-Step Cloud Launch</h2>
-            <div className="space-y-12">
-              <div className="relative pl-12"><div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">1</div><p className="text-xs text-slate-500">Visit Supabase and start a free project.</p></div>
+            <h2 className="text-xl font-black text-white mb-8">Cloud Activation Guide</h2>
+            <div className="space-y-8">
+              <div className="relative pl-12"><div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">1</div><p className="text-xs text-slate-500 font-medium">Create a free Supabase project.</p></div>
               <div className="relative pl-12">
                 <div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">2</div>
-                <p className="text-xs text-slate-500">Run the SQL script in the editor:</p>
-                <pre className="p-4 bg-black/40 rounded-2xl border border-white/5 text-[9px] font-mono text-slate-400 overflow-x-auto max-h-40">{sqlSetup}</pre>
-                <button onClick={() => { navigator.clipboard.writeText(sqlSetup); setCopied(true); }} className="mt-2 text-[10px] text-indigo-400 font-black uppercase tracking-widest">{copied ? 'COPIED!' : 'COPY SQL'}</button>
+                <p className="text-xs text-slate-500 font-medium">Copy the SQL below and run it in the **SQL Editor** tab. This opens the security policies for the app.</p>
+                <div className="mt-4 relative group">
+                  <pre className="p-4 bg-black/40 rounded-2xl border border-white/5 text-[9px] font-mono text-slate-400 overflow-x-auto max-h-48 custom-scrollbar">{sqlSetup}</pre>
+                  <button onClick={() => { navigator.clipboard.writeText(sqlSetup); setCopied(true); setTimeout(() => setCopied(false), 2000); }} className="absolute top-2 right-2 px-3 py-1 bg-indigo-600 text-white text-[8px] font-black rounded-lg uppercase tracking-widest shadow-lg">{copied ? 'COPIED!' : 'COPY'}</button>
+                </div>
               </div>
+              <div className="relative pl-12"><div className="absolute left-0 top-0 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-[10px] font-black text-indigo-400">3</div><p className="text-xs text-slate-500 font-medium">Paste your **Project URL** and **Anon Key** on the left. The app will sync instantly.</p></div>
             </div>
           </div>
         )}

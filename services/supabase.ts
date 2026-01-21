@@ -3,27 +3,24 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { ScheduleEvent, User } from '../types';
 
 let cachedClient: SupabaseClient | null = null;
+let cachedUrl: string | null = null;
+let cachedKey: string | null = null;
 
 const getCredentials = () => {
-  // 1. Priority: Environment Variables
   const envUrl = (process.env as any).SUPABASE_URL;
   const envKey = (process.env as any).SUPABASE_KEY;
   if (envUrl && envKey) return { url: envUrl, key: envKey };
 
-  // 2. Secondary: URL Search Parameters (for Magic Links)
   const params = new URLSearchParams(window.location.search);
   const urlFromUrl = params.get('s_url');
   const keyFromUrl = params.get('s_key');
   
   if (urlFromUrl && keyFromUrl) {
-    // Note: URLSearchParams.get() ALREADY decodes percent-encoding.
-    // Do NOT call decodeURIComponent again as it may break on special characters.
     localStorage.setItem('synccircle_cloud_url', urlFromUrl);
     localStorage.setItem('synccircle_cloud_key', keyFromUrl);
     return { url: urlFromUrl, key: keyFromUrl };
   }
 
-  // 3. Tertiary: Local Storage
   return {
     url: localStorage.getItem('synccircle_cloud_url') || '',
     key: localStorage.getItem('synccircle_cloud_key') || ''
@@ -34,33 +31,37 @@ export const getSupabaseClient = () => {
   const { url, key } = getCredentials();
   if (!url || !key) return null;
   
-  // Use a stable identifier for the client to avoid redundant recreations
-  const clientKey = `${url}::${key}`;
-  if (cachedClient && (cachedClient as any)._stableKey === clientKey) {
-    return cachedClient;
+  // If credentials changed, recreate the client
+  if (cachedClient && (cachedUrl !== url || cachedKey !== key)) {
+    cachedClient = null;
   }
 
+  if (cachedClient) return cachedClient;
+
   try {
-    const client = createClient(url, key);
-    (client as any)._stableKey = clientKey;
-    cachedClient = client;
+    cachedClient = createClient(url, key);
+    cachedUrl = url;
+    cachedKey = key;
     return cachedClient;
   } catch (err) {
-    console.error("Failed to initialize Supabase client:", err);
+    console.error("Supabase Init Error:", err);
     return null;
   }
 };
 
 /**
- * Generates the "Zero-Config" link for friends.
- * Encodes current connection details into the URL so friends don't need to enter keys.
+ * Resets the internal cache if you need to force a re-init
  */
+export const resetSupabaseClient = () => {
+  cachedClient = null;
+  cachedUrl = null;
+  cachedKey = null;
+};
+
 export const generateSuperLink = (circleId: string) => {
-  // Ensure we have a clean base URL without existing query params
   const baseUrl = window.location.origin + window.location.pathname;
   const { url, key } = getCredentials();
   
-  // If the keys are hardcoded in the environment, we don't need to leak them in the URL
   const isEnvProvided = (process.env as any).SUPABASE_URL && (process.env as any).SUPABASE_KEY;
   
   if (isEnvProvided) {
@@ -68,7 +69,6 @@ export const generateSuperLink = (circleId: string) => {
   }
 
   if (url && key) {
-    // We encode these for the URL, they will be decoded by URLSearchParams.get() on the other end
     const encodedUrl = encodeURIComponent(url);
     const encodedKey = encodeURIComponent(key);
     return `${baseUrl}?group=${circleId}&s_url=${encodedUrl}&s_key=${encodedKey}`;
@@ -79,15 +79,25 @@ export const generateSuperLink = (circleId: string) => {
 
 export const ensureCircleInCloud = async (id: string, name: string) => {
   const client = getSupabaseClient();
-  if (!client) throw new Error("Cloud not connected");
+  if (!client) throw new Error("Cloud database not initialized.");
   const { error } = await client.from('circles').upsert({ id, name }, { onConflict: 'id' });
-  if (error) throw error;
+  if (error) {
+    if (error.code === '42P01') throw new Error("Database Tables Missing: Run the SQL Setup script in Supabase.");
+    throw error;
+  }
+};
+
+export const checkCircleExists = async (id: string) => {
+  const client = getSupabaseClient();
+  if (!client) return false;
+  const { data, error } = await client.from('circles').select('id').eq('id', id).maybeSingle();
+  return !!data && !error;
 };
 
 export const ensureUserInCloud = async (user: User, circleId: string) => {
   const client = getSupabaseClient();
   if (!client) return;
-  await client.from('circle_users').upsert({
+  const { error } = await client.from('circle_users').upsert({
     id: user.id,
     circle_id: circleId,
     name: user.name,
@@ -95,6 +105,7 @@ export const ensureUserInCloud = async (user: User, circleId: string) => {
     avatar_url: user.avatar,
     timezone: user.timezone
   }, { onConflict: 'id' });
+  if (error) throw error;
 };
 
 export const fetchCircleData = async (circleId: string) => {
@@ -107,7 +118,8 @@ export const fetchCircleData = async (circleId: string) => {
       client.from('circles').select('name').eq('id', circleId).maybeSingle()
     ]);
     
-    if (uRes.error || eRes.error) throw new Error("Database fetch error");
+    if (uRes.error) throw uRes.error;
+    if (eRes.error) throw eRes.error;
 
     const users: User[] = (uRes.data || []).map(u => ({
       id: u.id, name: u.name, color: u.color, avatar: u.avatar_url, timezone: u.timezone, active: true
@@ -116,8 +128,8 @@ export const fetchCircleData = async (circleId: string) => {
       id: e.id, userId: e.user_id, title: e.title, day: e.day, startTime: e.start_time, duration: e.duration, startDate: e.start_date, endDate: e.end_date
     }));
     return { users, events, circleName: cRes.data?.name || 'Live Circle' };
-  } catch (err) {
-    console.error("Fetch Circle Data failed:", err);
+  } catch (err: any) {
+    console.warn("Fetch failed:", err.message);
     return { users: [], events: [], circleName: 'SyncCircle' };
   }
 };
