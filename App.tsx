@@ -6,7 +6,6 @@ import Sidebar from './components/Sidebar';
 import CalendarGrid from './components/CalendarGrid';
 import TimetableEntry from './components/TimetableEntry';
 import EventForm from './components/EventForm';
-import VoiceAssistant from './components/VoiceAssistant';
 import { 
   fetchCircleData, 
   syncEventToCloud, 
@@ -48,7 +47,6 @@ const App: React.FC = () => {
   const [isCloudSyncing, setIsCloudSyncing] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [joinCode, setJoinCode] = useState('');
-  const [showVoiceAssistant, setShowVoiceAssistant] = useState(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
   const [isCopied, setIsCopied] = useState(false);
 
@@ -275,11 +273,6 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-4">
-             {process.env.API_KEY && (
-               <button onClick={() => setShowVoiceAssistant(true)} className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-white hover:bg-indigo-600 transition-all border border-white/10 group">
-                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
-               </button>
-             )}
              <button 
                onClick={handleCopyInvite} 
                className={`px-8 py-3.5 rounded-2xl font-black text-sm shadow-xl transition-all active:scale-95 flex items-center gap-3 ${isCopied ? 'bg-emerald-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-[0_10px_30px_rgba(79,70,229,0.3)]'}`}
@@ -343,7 +336,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {showVoiceAssistant && <VoiceAssistant users={users} events={events} onClose={() => setShowVoiceAssistant(false)} />}
     </div>
   );
 };

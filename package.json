@@ -1,4 +1,3 @@
-
 {
   "name": "synccircle",
   "private": true,
@@ -10,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.37.0",
     "@supabase/supabase-js": "^2.39.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
