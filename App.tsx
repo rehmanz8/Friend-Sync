@@ -16,7 +16,8 @@ import {
   deleteEventFromCloud, 
   getSupabaseClient, 
   generateSuperLink,
-  resetSupabaseClient
+  resetSupabaseClient,
+  getSupabaseCredentials
 } from './services/supabase';
 
 const generateId = () => crypto.randomUUID();
@@ -29,6 +30,7 @@ const App: React.FC = () => {
   });
   
   const [cloudActive, setCloudActive] = useState(() => !!getSupabaseClient());
+  const [cloudError, setCloudError] = useState<string | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -47,13 +49,36 @@ const App: React.FC = () => {
   const loadData = useCallback(async (id: string) => {
     setIsSyncing(true);
     try {
-      const { users: cloudUsers, events: cloudEvents } = await fetchCircleData(id);
+      const { users: cloudUsers, events: cloudEvents, error } = await fetchCircleData(id);
+      if (error) {
+        setCloudError(error);
+        return;
+      }
       setUsers(cloudUsers);
       setEvents(cloudEvents);
+      setCloudError(null);
     } catch (err) {
       console.error(err);
+      setCloudError('Unable to load calendar data. Check your Supabase credentials.');
     } finally {
       setIsSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedUrl = params.get('s_url');
+    const sharedKey = params.get('s_key');
+    const group = params.get('group');
+
+    if (sharedUrl && sharedKey) {
+      localStorage.setItem('synccircle_cloud_url', sharedUrl);
+      localStorage.setItem('synccircle_cloud_key', sharedKey);
+      resetSupabaseClient();
+      setCloudActive(true);
+      setCloudError(null);
+      const nextUrl = group ? `?group=${group}` : window.location.pathname;
+      safeUpdateUrl(nextUrl);
     }
   }, []);
 
@@ -65,10 +90,15 @@ const App: React.FC = () => {
   }, [sessionId, cloudActive, loadData]);
 
   const handleCloudSetup = (url: string, key: string) => {
+    if (!url.trim() || !key.trim()) {
+      setCloudError('Please enter both a Supabase project URL and anon key.');
+      return;
+    }
     localStorage.setItem('synccircle_cloud_url', url);
     localStorage.setItem('synccircle_cloud_key', key);
     resetSupabaseClient();
     setCloudActive(true);
+    setCloudError(null);
   };
 
   const handleCreateUser = async (name: string) => {
@@ -80,7 +110,11 @@ const App: React.FC = () => {
       active: true,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
-    await ensureUserInCloud(newUser, sessionId);
+    const error = await ensureUserInCloud(newUser, sessionId);
+    if (error) {
+      setCloudError(error);
+      return;
+    }
     setCurrentUser(newUser);
     localStorage.setItem('synccircle_profile', JSON.stringify(newUser));
     setShowAddPersonModal(false);
@@ -89,7 +123,11 @@ const App: React.FC = () => {
 
   const handleCreateCalendar = async () => {
     const newId = generateId();
-    await ensureCircleInCloud(newId, "Shared Calendar");
+    const error = await ensureCircleInCloud(newId, "Shared Calendar");
+    if (error) {
+      setCloudError(error);
+      return;
+    }
     safeUpdateUrl(`?group=${newId}`);
     setSessionId(newId);
     setShowAddPersonModal(true); // Prompt for name immediately after creating
@@ -97,14 +135,22 @@ const App: React.FC = () => {
 
   const handleAddEvent = async (event: Omit<ScheduleEvent, 'id'>) => {
     if (!sessionId) return;
-    await syncEventToCloud(event, sessionId);
+    const error = await syncEventToCloud(event, sessionId);
+    if (error) {
+      setCloudError(error);
+      return;
+    }
     loadData(sessionId);
     setAddingEvent(false);
   };
 
   const handleDeleteEvent = async (id: string) => {
     if (!sessionId) return;
-    await deleteEventFromCloud(id);
+    const error = await deleteEventFromCloud(id);
+    if (error) {
+      setCloudError(error);
+      return;
+    }
     loadData(sessionId);
   };
 
@@ -116,7 +162,10 @@ const App: React.FC = () => {
     setTimeout(() => setIsCopied(false), 2000);
   };
 
-  if (!cloudActive) return <AuthScreen onActivate={handleCloudSetup} />;
+  if (!cloudActive) {
+    const { url, key } = getSupabaseCredentials();
+    return <AuthScreen onActivate={handleCloudSetup} error={cloudError} initialUrl={url} initialKey={key} />;
+  }
   if (!sessionId) return <LandingScreen onCreate={handleCreateCalendar} />;
   
   // If we have a session but no current user, we must ask for a name
@@ -139,6 +188,14 @@ const App: React.FC = () => {
       />
       
       <main className="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
+        {cloudError && (
+          <div className="px-4">
+            <div className="flex items-center justify-between gap-4 bg-rose-50 border border-rose-100 text-rose-700 px-4 py-3 rounded-2xl text-xs font-bold">
+              <span>{cloudError}</span>
+              <button onClick={() => setCloudError(null)} className="text-rose-400 hover:text-rose-600">Dismiss</button>
+            </div>
+          </div>
+        )}
         <header className="flex justify-between items-center px-4 shrink-0">
           <div>
             <h2 className="text-2xl font-black tracking-tight">Shared Calendar</h2>
