@@ -5,19 +5,6 @@ import { ScheduleEvent, User } from '../types';
 let cachedClient: SupabaseClient | null = null;
 
 const getCredentials = () => {
-  const envUrl = (process.env as any).SUPABASE_URL;
-  const envKey = (process.env as any).SUPABASE_KEY;
-  if (envUrl && envKey) return { url: envUrl, key: envKey };
-
-  const params = new URLSearchParams(window.location.search);
-  const u = params.get('s_url');
-  const k = params.get('s_key');
-  if (u && k) {
-    localStorage.setItem('synccircle_cloud_url', u);
-    localStorage.setItem('synccircle_cloud_key', k);
-    return { url: u, key: k };
-  }
-
   return {
     url: localStorage.getItem('synccircle_cloud_url') || '',
     key: localStorage.getItem('synccircle_cloud_key') || ''
@@ -36,52 +23,63 @@ export const resetSupabaseClient = () => { cachedClient = null; };
 export const generateSuperLink = (id: string) => {
   const { url, key } = getCredentials();
   const base = `${window.location.origin}${window.location.pathname}?group=${id}`;
-  if ((process.env as any).SUPABASE_URL) return base;
   return `${base}&s_url=${encodeURIComponent(url)}&s_key=${encodeURIComponent(key)}`;
 };
 
 export const ensureCircleInCloud = async (id: string, name: string) => {
   const c = getSupabaseClient();
-  if (c) await c.from('circles').upsert({ id, name });
-};
+  if (!c) return;
 
-export const checkCircleExists = async (id: string) => {
-  const c = getSupabaseClient();
-  if (!c) return false;
   const { data } = await c.from('circles').select('id').eq('id', id).maybeSingle();
-  return !!data;
+  if (!data) {
+    const { error } = await c.from('circles').insert({ id, name });
+    if (error) console.error('Error creating circle:', error);
+  }
 };
 
 export const ensureUserInCloud = async (user: User, circleId: string) => {
   const c = getSupabaseClient();
-  if (c) await c.from('circle_users').upsert({ id: user.id, circle_id: circleId, name: user.name, color: user.color });
+  if (!c) return;
+
+  const { error } = await c.from('circle_users').upsert({ id: user.id, circle_id: circleId, name: user.name, color: user.color });
+  if (error) console.error('Error upserting user:', error);
 };
 
 export const fetchCircleData = async (id: string) => {
   const c = getSupabaseClient();
   if (!c) return { users: [], events: [] };
-  const [u, e] = await Promise.all([
-    c.from('circle_users').select('*').eq('circle_id', id),
-    c.from('events').select('*').eq('circle_id', id)
-  ]);
+
+  const { data: usersData, error: usersError } = await c.from('circle_users').select('*').eq('circle_id', id);
+  if (usersError) console.error('Error fetching users:', usersError);
+
+  const { data: eventsData, error: eventsError } = await c.from('events').select('*').eq('circle_id', id);
+  if (eventsError) console.error('Error fetching events:', eventsError);
+
   return {
-    users: (u.data || []).map(x => ({ ...x, active: true })),
-    events: (e.data || []).map(x => ({ ...x, userId: x.user_id, startTime: x.start_time }))
+    users: (usersData || []).map(x => ({ ...x, active: true })),
+    events: (eventsData || []).map(x => ({ ...x, userId: x.user_id, startTime: x.start_time }))
   };
 };
 
 export const syncEventToCloud = async (e: Omit<ScheduleEvent, 'id'>, id: string) => {
   const c = getSupabaseClient();
-  if (c) await c.from('events').insert([{ user_id: e.userId, circle_id: id, title: e.title, day: e.day, start_time: e.startTime, duration: e.duration }]);
+  if (!c) return;
+
+  const { error } = await c.from('events').insert([{ user_id: e.userId, circle_id: id, title: e.title, day: e.day, start_time: e.startTime, duration: e.duration }]);
+  if (error) console.error('Error syncing event:', error);
 };
 
 export const deleteEventFromCloud = async (id: string) => {
   const c = getSupabaseClient();
-  if (c) await c.from('events').delete().eq('id', id);
+  if (!c) return;
+
+  const { error } = await c.from('events').delete().eq('id', id);
+  if (error) console.error('Error deleting event:', error);
 };
 
 export const subscribeToCircle = (id: string, cb: () => void) => {
   const c = getSupabaseClient();
   if (!c) return { unsubscribe: () => {} };
+
   return c.channel(id).on('postgres_changes', { event: '*', schema: 'public' }, cb).subscribe();
 };

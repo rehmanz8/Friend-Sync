@@ -1,10 +1,12 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, ScheduleEvent } from './types';
 import { COLORS } from './constants';
 import Sidebar from './components/Sidebar';
 import CalendarGrid from './components/CalendarGrid';
 import EventForm from './components/EventForm';
+import AuthScreen from './components/AuthScreen';
+import AddPersonModal from './components/AddPersonModal';
+import LandingScreen from './components/LandingScreen';
 import { 
   fetchCircleData, 
   syncEventToCloud, 
@@ -181,61 +183,5 @@ const App: React.FC = () => {
     </div>
   );
 };
-
-const AuthScreen = ({ onActivate }: { onActivate: (u: string, k: string) => void }) => (
-  <div className="h-screen w-full flex items-center justify-center bg-slate-100 p-6">
-    <div className="bg-white p-12 rounded-[3rem] shadow-2xl w-full max-w-md border border-slate-100">
-      <div className="w-16 h-16 bg-indigo-600 rounded-3xl mb-8 flex items-center justify-center text-white shadow-xl rotate-3">
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-      </div>
-      <h1 className="text-3xl font-black mb-2 tracking-tighter">Sync Engine</h1>
-      <p className="text-slate-400 text-sm mb-10 font-medium">Link your Supabase database to start collaborating.</p>
-      <div className="space-y-4">
-        <input id="u" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="Project URL" />
-        <input id="k" className="w-full p-5 bg-slate-50 rounded-2xl border border-slate-100 font-bold focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all" placeholder="Anon Key" />
-        <button onClick={() => onActivate((document.getElementById('u') as HTMLInputElement).value, (document.getElementById('k') as HTMLInputElement).value)} className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 mt-4">Connect Cloud</button>
-      </div>
-    </div>
-  </div>
-);
-
-const AddPersonModal = ({ onConfirm, onClose, canCancel }: { onConfirm: (n: string) => void, onClose: () => void, canCancel: boolean }) => {
-  const [n, setN] = useState('');
-  return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-6 z-[100]">
-      <div className="bg-white p-12 rounded-[3.5rem] shadow-2xl w-full max-w-sm text-center border border-white/20 animate-in zoom-in-95 duration-300">
-        <h1 className="text-3xl font-black mb-2 tracking-tighter">Who are you?</h1>
-        <p className="text-slate-400 text-sm mb-10 font-medium">Your events will use your unique color.</p>
-        <input 
-            autoFocus
-            className="w-full p-6 bg-slate-50 rounded-2xl mb-6 text-center text-xl font-black border border-slate-100 outline-none focus:ring-4 focus:ring-indigo-500/10" 
-            placeholder="Your Name" 
-            value={n} 
-            onChange={e => setN(e.target.value)} 
-            onKeyDown={e => e.key === 'Enter' && n && onConfirm(n)} 
-        />
-        <div className="flex gap-3">
-          {canCancel && <button onClick={onClose} className="flex-1 py-5 bg-slate-100 text-slate-400 rounded-2xl font-black">Back</button>}
-          <button disabled={!n} onClick={() => onConfirm(n)} className="flex-1 py-5 bg-indigo-600 text-white rounded-2xl font-black shadow-lg disabled:opacity-50">Enter Room</button>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const LandingScreen = ({ onCreate }: { onCreate: () => void }) => (
-  <div className="h-screen w-full flex items-center justify-center bg-slate-100 p-6">
-    <button onClick={onCreate} className="bg-indigo-600 p-16 rounded-[4rem] text-white text-center hover:scale-105 transition-all shadow-2xl shadow-indigo-200 group relative overflow-hidden">
-      <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="relative z-10">
-        <div className="w-20 h-20 bg-white/20 rounded-3xl mx-auto mb-8 flex items-center justify-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
-        </div>
-        <h3 className="text-4xl font-black tracking-tighter">Create New Calendar</h3>
-        <p className="opacity-60 mt-4 font-bold text-lg">Start scheduling with friends in seconds.</p>
-      </div>
-    </button>
-  </div>
-);
 
 export default App;
